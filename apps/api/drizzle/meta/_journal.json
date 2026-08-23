@@ -1,1 +1,27 @@
-{"version":"7","dialect":"postgresql","entries":[]}
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1787502777959,
+      "tag": "0000_thankful_paibok",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1787503052755,
+      "tag": "0001_bumpy_major_mapleleaf",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1787503283456,
+      "tag": "0002_parched_gressill",
+      "breakpoints": true
+    }
+  ]
+}
