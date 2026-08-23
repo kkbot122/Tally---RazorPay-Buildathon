@@ -43,6 +43,9 @@ export {
   ledgerRecordIsUnused,
 } from "./src/compatibility/index.js";
 
+export { applyExactReferenceRule } from "./src/matching/index.js";
+export type { ExactReferenceRuleInput, ExactReferenceRuleResult } from "./src/matching/index.js";
+
 export type {
   CompatibilityFailureCode,
   CompatibilityResult,

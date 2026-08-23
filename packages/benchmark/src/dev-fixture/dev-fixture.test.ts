@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import {
+  applyExactReferenceRule,
   checkPairCompatibility,
   createRecordLookup,
   emptyUsedRecordState,
@@ -138,5 +139,33 @@ describe("20-case development fixture", () => {
       records,
       usedRecords: unused,
     }).compatible).toBe(true);
+  });
+
+  it("applies R1 across the full fixture without collapsing later categories", () => {
+    const fixture = buildDevFixture();
+    const records = createRecordLookup(
+      fixture.cases.flatMap((benchmarkCase) => benchmarkCase.bankTransactions),
+      fixture.cases.flatMap((benchmarkCase) => benchmarkCase.ledgerTransactions),
+    );
+    const usedRecords = emptyUsedRecordState();
+    const apply = (benchmarkCase: (typeof fixture.cases)[number]) => applyExactReferenceRule({
+      bankRecordId: benchmarkCase.bankTransactions[0]!.bankTxnId,
+      records,
+      usedRecords,
+    });
+
+    for (const benchmarkCase of fixture.cases.filter((candidate) => candidate.category === "EXACT")) {
+      expect(apply(benchmarkCase)).toEqual({
+        status: "MATCH",
+        bankRecordId: benchmarkCase.bankTransactions[0]!.bankTxnId,
+        ledgerRecordId: benchmarkCase.truth.ledgerRecordIds[0],
+        reasonCode: "EXACT_MATCH",
+      });
+    }
+    for (const category of ["NORMALIZED_REFERENCE", "STRONG_CONTEXT", "SEMANTIC", "DISCREPANCY", "AMBIGUOUS"] as const) {
+      for (const benchmarkCase of fixture.cases.filter((candidate) => candidate.category === category)) {
+        expect(apply(benchmarkCase)).toEqual({ status: "NO_MATCH" });
+      }
+    }
   });
 });
