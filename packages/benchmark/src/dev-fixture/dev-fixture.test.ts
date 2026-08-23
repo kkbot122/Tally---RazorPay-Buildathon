@@ -10,6 +10,7 @@ import {
   runDeterministicReconciliation,
   generateCandidates,
   buildReconciliationReasoningInput,
+  verifyMatchProposal,
   checkPairCompatibility,
   createRecordLookup,
   emptyUsedRecordState,
@@ -428,5 +429,87 @@ describe("20-case development fixture", () => {
     expect(timingPrompt).toContain(fixture.asOfDate);
     expect(timingPrompt).toContain("For TIMING_DIFFERENCE, cite supplied timing evidence");
     expect(timingPrompt).not.toContain('"expectedOutcome":"EXPLAINED_OUTSTANDING"');
+  });
+
+  it("applies T020 safety checks to semantic, discrepancy, and conflicting fixture proposals", () => {
+    const fixture = buildDevFixture();
+    const records = createRecordLookup(
+      fixture.cases.flatMap((benchmarkCase) => benchmarkCase.bankTransactions),
+      fixture.cases.flatMap((benchmarkCase) => benchmarkCase.ledgerTransactions),
+    );
+    const deterministic = runDeterministicReconciliation({ records });
+    const evidenceFor = (bankRecordId: string, ledgerRecordIds: string[]) => [{
+      statement: "The supplied records contain related transaction evidence.",
+      source: "CROSS_RECORD" as const,
+      recordIds: [bankRecordId, ...ledgerRecordIds],
+    }];
+    const candidateSetFor = (benchmarkCase: (typeof fixture.cases)[number]) => generateCandidates({
+      primary: { side: "BANK", recordId: benchmarkCase.bankTransactions[0]!.bankTxnId },
+      records,
+      usedRecords: deterministic.usedRecords,
+    });
+
+    for (const benchmarkCase of fixture.cases.filter((candidate) => candidate.category === "SEMANTIC")) {
+      const bankRecordId = benchmarkCase.bankTransactions[0]!.bankTxnId;
+      const ledgerRecordIds = [benchmarkCase.truth.ledgerRecordIds[0]!];
+      const result = verifyMatchProposal({
+        proposal: {
+          proposedOutcome: "MATCH",
+          bankRecordIds: [bankRecordId],
+          ledgerRecordIds,
+          confidence: "HIGH",
+          evidence: evidenceFor(bankRecordId, ledgerRecordIds),
+          conflictingEvidence: [],
+          reason: "The supplied semantic evidence supports the relationship.",
+        },
+        primary: { side: "BANK", recordId: bankRecordId },
+        candidateSet: candidateSetFor(benchmarkCase),
+        records,
+        usedRecords: deterministic.usedRecords,
+      });
+      expect(result.status).toBe("VERIFIED");
+    }
+
+    const amountDiscrepancy = fixture.cases.find((candidate) => candidate.reasonCode === "AMOUNT_DISCREPANCY")!;
+    const discrepancyBankId = amountDiscrepancy.bankTransactions[0]!.bankTxnId;
+    const discrepancyLedgerId = amountDiscrepancy.truth.ledgerRecordIds[0]!;
+    const discrepancyResult = verifyMatchProposal({
+      proposal: {
+        proposedOutcome: "MATCH",
+        bankRecordIds: [discrepancyBankId],
+        ledgerRecordIds: [discrepancyLedgerId],
+        confidence: "HIGH",
+        evidence: evidenceFor(discrepancyBankId, [discrepancyLedgerId]),
+        conflictingEvidence: [],
+        reason: "A persuasive but incorrect match proposal.",
+      },
+      primary: { side: "BANK", recordId: discrepancyBankId },
+      candidateSet: candidateSetFor(amountDiscrepancy),
+      records,
+      usedRecords: deterministic.usedRecords,
+    });
+    expect(discrepancyResult.status).toBe("REJECTED");
+    expect(discrepancyResult.status === "REJECTED" && discrepancyResult.failures.map((failure) => failure.code)).toContain("AMOUNT_MISMATCH");
+
+    const conflicting = fixture.cases.find((candidate) => candidate.reasonCode === "CONFLICTING_RECORDS")!;
+    const conflictingBankId = conflicting.bankTransactions[0]!.bankTxnId;
+    const conflictingLedgerId = conflicting.truth.ledgerRecordIds[0]!;
+    const conflictingResult = verifyMatchProposal({
+      proposal: {
+        proposedOutcome: "MATCH",
+        bankRecordIds: [conflictingBankId],
+        ledgerRecordIds: [conflictingLedgerId],
+        confidence: "HIGH",
+        evidence: evidenceFor(conflictingBankId, [conflictingLedgerId]),
+        conflictingEvidence: [{ statement: "The supplied records contain contradictory reference evidence.", source: "CROSS_RECORD", recordIds: [conflictingBankId, conflictingLedgerId] }],
+        reason: "The records are related but contradictory.",
+      },
+      primary: { side: "BANK", recordId: conflictingBankId },
+      candidateSet: candidateSetFor(conflicting),
+      records,
+      usedRecords: deterministic.usedRecords,
+    });
+    expect(conflictingResult.status).toBe("REJECTED");
+    expect(conflictingResult.status === "REJECTED" && conflictingResult.failures.map((failure) => failure.code)).toContain("CONFLICTING_EVIDENCE");
   });
 });

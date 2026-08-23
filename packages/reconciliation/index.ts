@@ -112,6 +112,14 @@ export type {
 } from "./src/agent/index.js";
 export type { BuildReasoningPromptInput, ReasoningPrimary } from "./src/agent/index.js";
 
+export { verifyMatchProposal } from "./src/verifier/index.js";
+export type {
+  MatchVerificationFailure,
+  MatchVerificationFailureCode,
+  MatchVerificationResult,
+  VerifyMatchProposalInput,
+} from "./src/verifier/index.js";
+
 export type {
   CsvSource,
   CsvValidationIssue,
