@@ -18,14 +18,18 @@ export type TrueFinancialEvent = {
   currency: "INR";
   direction: "CREDIT" | "DEBIT";
   counterpartyEntityId: string;
+  canonicalCounterpartyName: string;
   canonicalReference: string;
   baseDate: string;
 };
 
 export type TimingEvidence = {
+  asOfDate: string;
   accountingDate: string;
   expectedDate: string;
 };
+
+export const BENCHMARK_AS_OF_DATE = "2026-10-01";
 
 export type BenchmarkTruth = {
   bankRecordIds: string[];

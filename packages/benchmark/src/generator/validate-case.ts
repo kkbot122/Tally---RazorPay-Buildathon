@@ -43,6 +43,8 @@ export function validateBenchmarkCase(benchmarkCase: BenchmarkCase): BenchmarkCa
       assert(benchmarkCase.expectedOutcome === "EXPLAINED_OUTSTANDING", "timing outcome is incorrect");
       assert(benchmarkCase.truth.timingEvidence !== undefined, "timing evidence is required");
       assert(benchmarkCase.bankTransactions.length === 0, "timing case must have no current bank counterpart");
+      assert(benchmarkCase.truth.timingEvidence.expectedDate > benchmarkCase.truth.timingEvidence.asOfDate, "timing maturity must be after the run as-of date");
+      assert(benchmarkCase.truth.timingEvidence.accountingDate < benchmarkCase.truth.timingEvidence.asOfDate, "timing accounting date must be before the run as-of date");
       break;
     case "GROUPED_ONE_TO_MANY":
       assert(benchmarkCase.bankTransactions.length === 1 && [2, 3].includes(benchmarkCase.ledgerTransactions.length), "one-to-many group size must be 2 or 3");
@@ -72,7 +74,12 @@ export function validateBenchmarkCase(benchmarkCase: BenchmarkCase): BenchmarkCa
   }
 
   if (benchmarkCase.category === "DISCREPANCY") {
-    assert(benchmarkCase.bankTransactions[0]?.amount !== benchmarkCase.ledgerTransactions[0]?.amount, "discrepancy amounts must differ");
+    if (benchmarkCase.reasonCode === "AMOUNT_DISCREPANCY") {
+      assert(benchmarkCase.bankTransactions[0]?.amount !== benchmarkCase.ledgerTransactions[0]?.amount, "amount discrepancy records must differ in amount");
+    } else {
+      assert(benchmarkCase.bankTransactions[0]?.amount === benchmarkCase.ledgerTransactions[0]?.amount, "conflicting records retain the same amount");
+      assert(benchmarkCase.bankTransactions[0]?.direction !== benchmarkCase.ledgerTransactions[0]?.direction, "conflicting records must differ in direction");
+    }
   }
 
   return benchmarkCase;

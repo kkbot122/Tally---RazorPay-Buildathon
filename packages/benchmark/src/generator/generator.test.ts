@@ -79,6 +79,26 @@ describe("truth-first benchmark generator", () => {
 
     expect(semantic.bankTransactions[0]?.counterparty).not.toBe(semantic.ledgerTransactions[0]?.counterparty);
     expect(discrepancy.bankTransactions[0]?.amount).not.toBe(discrepancy.ledgerTransactions[0]?.amount);
+    const conflicting = generateBenchmarkCase({ seed: 23, caseId: "C003", category: "DISCREPANCY" });
+    expect(conflicting.reasonCode).toBe("CONFLICTING_RECORDS");
+    expect(conflicting.bankTransactions[0]?.amount).toBe(conflicting.ledgerTransactions[0]?.amount);
+    expect(conflicting.bankTransactions[0]?.direction).not.toBe(conflicting.ledgerTransactions[0]?.direction);
+  });
+
+  it("uses canonical reason codes and keeps semantic references distinct after normalization", () => {
+    const semantic = generateBenchmarkCase({ seed: 51, caseId: "C001", category: "SEMANTIC" });
+    const normalize = (value: string | null) => (value ?? "").toLowerCase().replace(/[\s\p{P}]/gu, "");
+    expect(semantic.reasonCode).toBe("MULTI_EVIDENCE_MATCH");
+    expect(normalize(semantic.bankTransactions[0]?.reference ?? null)).not.toBe(normalize(semantic.ledgerTransactions[0]?.reference ?? null));
+  });
+
+  it("makes ambiguous alternatives observably identical and timing relative to as-of", () => {
+    const ambiguous = generateBenchmarkCase({ seed: 61, caseId: "C001", category: "AMBIGUOUS" });
+    const [first, second] = ambiguous.ledgerTransactions;
+    expect({ ...first!, ledgerTxnId: undefined }).toEqual({ ...second!, ledgerTxnId: undefined });
+    const timing = generateBenchmarkCase({ seed: 61, caseId: "C002", category: "TIMING" });
+    expect(timing.truth.timingEvidence!.accountingDate < timing.truth.timingEvidence!.asOfDate).toBe(true);
+    expect(timing.truth.timingEvidence!.expectedDate > timing.truth.timingEvidence!.asOfDate).toBe(true);
   });
 
   it("rejects unsupported many-to-many output", () => {

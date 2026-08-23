@@ -1,0 +1,21 @@
+case_id,bank_record_ids,ledger_record_ids,expected_outcome,reason_code,notes
+C001,B9773,L1681,RECONCILED,EXACT_MATCH,
+C002,B7918,L5836,RECONCILED,EXACT_MATCH,
+C003,B7499,L3147,RECONCILED,EXACT_MATCH,
+C004,B2674,L4176,RECONCILED,NORMALIZED_REFERENCE_MATCH,
+C005,B2654,L1523,RECONCILED,NORMALIZED_REFERENCE_MATCH,
+C006,B4077,L5542,RECONCILED,COUNTERPARTY_MATCH,
+C007,B8049,L9912,RECONCILED,COUNTERPARTY_MATCH,
+C008,B2176,L2032,RECONCILED,MULTI_EVIDENCE_MATCH,"Relationship is grounded in the canonical synthetic entity and invoice event, not one exact text field."
+C009,B2529,L6724,RECONCILED,MULTI_EVIDENCE_MATCH,"Relationship is grounded in the canonical synthetic entity and invoice event, not one exact text field."
+C010,,L3733,EXPLAINED_OUTSTANDING,TIMING_DIFFERENCE,The ledger record has explicit future maturity evidence and no bank counterpart in the current window. As-of date: 2026-10-01.
+C011,,L1898,EXPLAINED_OUTSTANDING,TIMING_DIFFERENCE,The ledger record has explicit future maturity evidence and no bank counterpart in the current window. As-of date: 2026-10-01.
+C012,B1726,L3107|L6266,RECONCILED,GROUPED_MATCH,
+C013,B3300,L1454|L6080|L1660,RECONCILED,GROUPED_MATCH,
+C014,B1344|B1171,L8460,RECONCILED,GROUPED_MATCH,
+C015,B4821|B2401|B5772,L7408,RECONCILED,GROUPED_MATCH,
+C016,B8281,L8306,DISCREPANCY,AMOUNT_DISCREPANCY,"Related references and entities are present, but the amounts contradict without an explanatory record."
+C017,B7348,L8023,DISCREPANCY,CONFLICTING_RECORDS,The records share the event reference and amount but conflict on transaction direction.
+C018,B4669,,UNRESOLVED,MULTIPLE_PLAUSIBLE_CANDIDATES,Both ledger records expose identical observable evidence; no unique counterpart is truth-selected.
+C019,B9393,,UNRESOLVED,MULTIPLE_PLAUSIBLE_CANDIDATES,Both ledger records expose identical observable evidence; no unique counterpart is truth-selected.
+C020,B9938,,UNRESOLVED,NO_CANDIDATE,No compatible ledger representation is generated for this event.

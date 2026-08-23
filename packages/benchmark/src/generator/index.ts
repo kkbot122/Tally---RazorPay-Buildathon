@@ -5,7 +5,7 @@ import { validateBenchmarkCase } from "./validate-case.js";
 import type { BenchmarkGenerator, GenerateCaseInput } from "./types.js";
 
 export function createBenchmarkGenerator(options: { seed: number }): BenchmarkGenerator {
-  const context = { random: createRandomSource(options.seed), ids: createIdFactory() };
+  const context = { random: createRandomSource(options.seed), ids: createIdFactory(options.seed) };
   const generatedCaseIds = new Set<string>();
 
   return {
@@ -33,3 +33,4 @@ export type {
   GenerateCaseInput,
   TrueFinancialEvent,
 } from "./types.js";
+export { BENCHMARK_AS_OF_DATE } from "./types.js";

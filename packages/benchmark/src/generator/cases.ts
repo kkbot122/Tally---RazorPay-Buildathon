@@ -1,4 +1,5 @@
 import type { BenchmarkCase, BenchmarkCaseCategory } from "./types.js";
+import { BENCHMARK_AS_OF_DATE } from "./types.js";
 import { cents, chooseEntity, createEvent, dateAfter, emptyTruth, makeBank, makeLedger, money, type GeneratorContext } from "./helpers.js";
 
 type CaseBuilder = (context: GeneratorContext, caseId: string) => BenchmarkCase;
@@ -19,7 +20,7 @@ function oneToOne(
   return { caseId, category, expectedOutcome, reasonCode, bankTransactions: bank, ledgerTransactions: ledger, truth: emptyTruth(event, bank, ledger), notes };
 }
 
-const exact: CaseBuilder = (context, caseId) => oneToOne(context, caseId, "EXACT", "RECONCILED", "EXACT_REFERENCE_MATCH");
+const exact: CaseBuilder = (context, caseId) => oneToOne(context, caseId, "EXACT", "RECONCILED", "EXACT_MATCH");
 
 const normalizedReference: CaseBuilder = (context, caseId) => {
   const event = createEvent(context);
@@ -29,7 +30,7 @@ const normalizedReference: CaseBuilder = (context, caseId) => {
   return { caseId, category: "NORMALIZED_REFERENCE", expectedOutcome: "RECONCILED", reasonCode: "NORMALIZED_REFERENCE_MATCH", bankTransactions: bank, ledgerTransactions: ledger, truth: emptyTruth(event, bank, ledger) };
 };
 
-const strongContext: CaseBuilder = (context, caseId) => oneToOne(context, caseId, "STRONG_CONTEXT", "RECONCILED", "CONTEXTUAL_MATCH", { reference: null }, { reference: null });
+const strongContext: CaseBuilder = (context, caseId) => oneToOne(context, caseId, "STRONG_CONTEXT", "RECONCILED", "COUNTERPARTY_MATCH", { reference: null }, { reference: null });
 
 const semantic: CaseBuilder = (context, caseId) => {
   const entity = chooseEntity(context);
@@ -38,19 +39,19 @@ const semantic: CaseBuilder = (context, caseId) => {
   const bank = [makeBank(context, event, {
     reference: `INV-${number}`,
     counterparty: entity.variants[0] ?? entity.canonicalName,
-    description: `NEFT ${entity.variants[0] ?? entity.canonicalName} ${event.canonicalReference}`,
+    description: `NEFT ${entity.variants[0] ?? entity.canonicalName}, ${event.canonicalReference}`,
   })];
   const ledger = [makeLedger(context, event, {
     reference: `Invoice ${number}`,
     counterparty: entity.canonicalName,
     description: `Receipt against invoice #${number}`,
   })];
-  return { caseId, category: "SEMANTIC", expectedOutcome: "RECONCILED", reasonCode: "CONTEXTUAL_MATCH", bankTransactions: bank, ledgerTransactions: ledger, truth: emptyTruth(event, bank, ledger), notes: "Relationship is grounded in the canonical synthetic entity and invoice event, not one exact text field." };
+  return { caseId, category: "SEMANTIC", expectedOutcome: "RECONCILED", reasonCode: "MULTI_EVIDENCE_MATCH", bankTransactions: bank, ledgerTransactions: ledger, truth: emptyTruth(event, bank, ledger), notes: "Relationship is grounded in the canonical synthetic entity and invoice event, not one exact text field." };
 };
 
 const timing: CaseBuilder = (context, caseId) => {
-  const event = createEvent(context);
-  const expectedDate = dateAfter(event.baseDate, 3);
+  const event = { ...createEvent(context), baseDate: "2026-09-28" };
+  const expectedDate = dateAfter(event.baseDate, 4);
   const ledger = [makeLedger(context, event, { maturityDate: expectedDate, reference: null, counterparty: null })];
   return {
     caseId,
@@ -59,7 +60,7 @@ const timing: CaseBuilder = (context, caseId) => {
     reasonCode: "TIMING_DIFFERENCE",
     bankTransactions: [],
     ledgerTransactions: ledger,
-    truth: { ...emptyTruth(event, [], ledger), timingEvidence: { accountingDate: event.baseDate, expectedDate } },
+    truth: { ...emptyTruth(event, [], ledger), timingEvidence: { asOfDate: BENCHMARK_AS_OF_DATE, accountingDate: event.baseDate, expectedDate } },
     notes: "The ledger record has explicit future maturity evidence and no bank counterpart in the current window.",
   };
 };
@@ -68,7 +69,10 @@ function grouped(context: GeneratorContext, caseId: string, manyOn: "BANK" | "LE
   const event = createEvent(context);
   const targetCents = cents(event.amount);
   const first = Math.floor(targetCents * 0.4);
-  const parts = [first, targetCents - first];
+  const groupSize = Number.parseInt(caseId.slice(1), 10) % 2 === 0 ? 2 : 3;
+  const parts = groupSize === 2
+    ? [first, targetCents - first]
+    : [first, Math.floor(targetCents * 0.35), targetCents - first - Math.floor(targetCents * 0.35)];
   const groupReference = `BATCH-${event.canonicalReference}`;
   if (manyOn === "LEDGER") {
     const bank = [makeBank(context, event, { reference: groupReference, batchId: groupReference })];
@@ -85,9 +89,14 @@ const groupedManyToOne: CaseBuilder = (context, caseId) => grouped(context, case
 
 const discrepancy: CaseBuilder = (context, caseId) => {
   const event = createEvent(context);
-  const bank = [makeBank(context, event, { amount: money(cents(event.amount) - 5_000) })];
-  const ledger = [makeLedger(context, event)];
-  return { caseId, category: "DISCREPANCY", expectedOutcome: "DISCREPANCY", reasonCode: "AMOUNT_DIFFERENCE", bankTransactions: bank, ledgerTransactions: ledger, truth: emptyTruth(event, bank, ledger), notes: "Related references and entities are present, but the amounts contradict without an explanatory record." };
+  if (Number.parseInt(caseId.replace(/\D/g, ""), 10) % 2 === 0) {
+    const bank = [makeBank(context, event, { amount: money(cents(event.amount) - 5_000) })];
+    const ledger = [makeLedger(context, event)];
+    return { caseId, category: "DISCREPANCY", expectedOutcome: "DISCREPANCY", reasonCode: "AMOUNT_DISCREPANCY", bankTransactions: bank, ledgerTransactions: ledger, truth: emptyTruth(event, bank, ledger), notes: "Related references and entities are present, but the amounts contradict without an explanatory record." };
+  }
+  const bank = [makeBank(context, event)];
+  const ledger = [makeLedger(context, event, { direction: event.direction === "CREDIT" ? "DEBIT" : "CREDIT" })];
+  return { caseId, category: "DISCREPANCY", expectedOutcome: "DISCREPANCY", reasonCode: "CONFLICTING_RECORDS", bankTransactions: bank, ledgerTransactions: ledger, truth: emptyTruth(event, bank, ledger), notes: "The records share the event reference and amount but conflict on transaction direction." };
 };
 
 const ambiguous: CaseBuilder = (context, caseId) => {
@@ -97,13 +106,13 @@ const ambiguous: CaseBuilder = (context, caseId) => {
     makeLedger(context, event, { reference: null, counterparty: "Ambiguous Synthetic Entity", description: null }),
     makeLedger(context, event, { reference: null, counterparty: "Ambiguous Synthetic Entity", description: null }),
   ];
-  return { caseId, category: "AMBIGUOUS", expectedOutcome: "UNRESOLVED", reasonCode: "MULTIPLE_CANDIDATES", bankTransactions: bank, ledgerTransactions: ledger, truth: { ...emptyTruth(event, bank, []), plausibleLedgerRecordIds: ledger.map((record) => record.ledgerTxnId) }, notes: "Both ledger records expose identical observable evidence; no unique counterpart is truth-selected." };
+  return { caseId, category: "AMBIGUOUS", expectedOutcome: "UNRESOLVED", reasonCode: "MULTIPLE_PLAUSIBLE_CANDIDATES", bankTransactions: bank, ledgerTransactions: ledger, truth: { ...emptyTruth(event, bank, []), plausibleLedgerRecordIds: ledger.map((record) => record.ledgerTxnId) }, notes: "Both ledger records expose identical observable evidence; no unique counterpart is truth-selected." };
 };
 
 const noCandidate: CaseBuilder = (context, caseId) => {
   const event = createEvent(context);
   const bank = [makeBank(context, event, { reference: "XYZ991", counterparty: null, description: null })];
-  return { caseId, category: "NO_CANDIDATE", expectedOutcome: "UNRESOLVED", reasonCode: "MISSING_COUNTERPART", bankTransactions: bank, ledgerTransactions: [], truth: emptyTruth(event, bank, []), notes: "No compatible ledger representation is generated for this event." };
+  return { caseId, category: "NO_CANDIDATE", expectedOutcome: "UNRESOLVED", reasonCode: "NO_CANDIDATE", bankTransactions: bank, ledgerTransactions: [], truth: emptyTruth(event, bank, []), notes: "No compatible ledger representation is generated for this event." };
 };
 
 export const CASE_BUILDERS: Record<BenchmarkCaseCategory, CaseBuilder> = {
