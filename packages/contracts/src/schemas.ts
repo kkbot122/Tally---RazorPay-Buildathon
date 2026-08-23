@@ -72,10 +72,10 @@ export const AgentEvidenceSchema = z.object({
 
 export const AgentProposalSchema = z.object({
   proposedOutcome: AgentProposedOutcomeSchema,
-  bankTxnIds: z.array(id),
-  ledgerTxnIds: z.array(id),
+  bankRecordIds: z.array(id),
+  ledgerRecordIds: z.array(id),
   confidence: AgentConfidenceSchema,
-  supportingEvidence: z.array(AgentEvidenceSchema).min(1),
+  evidence: z.array(AgentEvidenceSchema).min(1),
   conflictingEvidence: z.array(AgentEvidenceSchema),
   reason: nonEmptyText,
 });

@@ -12,7 +12,9 @@
   },
   "dependencies": {
     "@tally/contracts": "workspace:*",
-    "csv-parse": "^5.6.0"
+    "csv-parse": "^5.6.0",
+    "openai": "^7.5.0",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "typescript": "^5.7.3",

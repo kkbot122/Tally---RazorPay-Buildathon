@@ -96,6 +96,19 @@ export type {
   UsedRecordState,
 } from "./src/compatibility/index.js";
 
+export {
+  AgentProposalSchema,
+  DEFAULT_REASONING_MODEL,
+  OpenAIResponsesAdapter,
+  ReasoningAdapterError,
+} from "./src/agent/index.js";
+export type {
+  OpenAIResponsesAdapterOptions,
+  ReasoningAdapterErrorCode,
+  ReasoningModelAdapter,
+  ReasoningModelInput,
+} from "./src/agent/index.js";
+
 export type {
   CsvSource,
   CsvValidationIssue,

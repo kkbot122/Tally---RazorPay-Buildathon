@@ -57,10 +57,10 @@ describe("enum contracts", () => {
 describe("agent contracts", () => {
   const validProposal = {
     proposedOutcome: "MATCH",
-    bankTxnIds: ["bank_001"],
-    ledgerTxnIds: ["ledger_001"],
+    bankRecordIds: ["bank_001"],
+    ledgerRecordIds: ["ledger_001"],
     confidence: "HIGH",
-    supportingEvidence: [
+    evidence: [
       {
         statement: "The references are equivalent.",
         source: "CROSS_RECORD",
@@ -71,10 +71,20 @@ describe("agent contracts", () => {
     reason: "The records describe the same payment.",
   } as const;
 
-  it("requires supporting and conflicting evidence fields", () => {
+  it("requires evidence and conflicting evidence fields", () => {
     expect(AgentProposalSchema.parse(validProposal)).toEqual(validProposal);
-    expect(() => AgentProposalSchema.parse({ ...validProposal, supportingEvidence: undefined })).toThrow();
+    expect(() => AgentProposalSchema.parse({ ...validProposal, evidence: undefined })).toThrow();
     expect(() => AgentProposalSchema.parse({ ...validProposal, conflictingEvidence: undefined })).toThrow();
+  });
+
+  it("rejects obsolete proposal field aliases", () => {
+    const { bankRecordIds: _, ledgerRecordIds: __, evidence: ___, ...rest } = validProposal;
+    expect(() => AgentProposalSchema.parse({
+      ...rest,
+      bankTxnIds: ["bank_001"],
+      ledgerTxnIds: ["ledger_001"],
+      supportingEvidence: validProposal.evidence,
+    })).toThrow();
   });
 });
 
