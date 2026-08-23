@@ -47,6 +47,7 @@ export {
   applyExactReferenceRule,
   applyNormalizedReferenceRule,
   applyOneToManyGroupedRule,
+  applyManyToOneGroupedRule,
   applyStrongContextRule,
   differenceInCalendarDays,
 } from "./src/matching/index.js";
@@ -59,6 +60,8 @@ export type {
   StrongContextRuleResult,
   OneToManyGroupedRuleInput,
   OneToManyGroupedRuleResult,
+  ManyToOneGroupedRuleInput,
+  ManyToOneGroupedRuleResult,
 } from "./src/matching/index.js";
 
 export type {

@@ -6,6 +6,7 @@ import {
   applyNormalizedReferenceRule,
   applyStrongContextRule,
   applyOneToManyGroupedRule,
+  applyManyToOneGroupedRule,
   checkPairCompatibility,
   createRecordLookup,
   emptyUsedRecordState,
@@ -254,6 +255,38 @@ describe("20-case development fixture", () => {
     for (const benchmarkCase of fixture.cases.filter((candidate) => candidate.category !== "GROUPED_ONE_TO_MANY")) {
       for (const bankRecord of benchmarkCase.bankTransactions) {
         expect(apply(bankRecord.bankTxnId)).toEqual({ status: "NO_MATCH" });
+      }
+    }
+  });
+
+  it("applies R5 only to grouped many-bank-to-one-ledger cases", () => {
+    const fixture = buildDevFixture();
+    const records = createRecordLookup(
+      fixture.cases.flatMap((benchmarkCase) => benchmarkCase.bankTransactions),
+      fixture.cases.flatMap((benchmarkCase) => benchmarkCase.ledgerTransactions),
+    );
+    const usedRecords = emptyUsedRecordState();
+    const apply = (ledgerRecordId: string) => applyManyToOneGroupedRule({ ledgerRecordId, records, usedRecords });
+
+    for (const benchmarkCase of fixture.cases.filter((candidate) => candidate.category === "GROUPED_MANY_TO_ONE")) {
+      const ledgerRecordId = benchmarkCase.ledgerTransactions[0]!.ledgerTxnId;
+      expect(apply(ledgerRecordId)).toEqual({
+        status: "MATCH",
+        bankRecordIds: [...benchmarkCase.truth.bankRecordIds].sort(),
+        ledgerRecordId,
+        reasonCode: "GROUPED_MATCH",
+      });
+      for (const bankRecord of benchmarkCase.bankTransactions) {
+        expect(applyExactReferenceRule({ bankRecordId: bankRecord.bankTxnId, records, usedRecords })).toEqual({ status: "NO_MATCH" });
+        expect(applyNormalizedReferenceRule({ bankRecordId: bankRecord.bankTxnId, records, usedRecords })).toEqual({ status: "NO_MATCH" });
+        expect(applyStrongContextRule({ bankRecordId: bankRecord.bankTxnId, records, usedRecords })).toEqual({ status: "NO_MATCH" });
+        expect(applyOneToManyGroupedRule({ bankRecordId: bankRecord.bankTxnId, records, usedRecords })).toEqual({ status: "NO_MATCH" });
+      }
+    }
+
+    for (const benchmarkCase of fixture.cases.filter((candidate) => candidate.category !== "GROUPED_MANY_TO_ONE")) {
+      for (const ledgerRecord of benchmarkCase.ledgerTransactions) {
+        expect(apply(ledgerRecord.ledgerTxnId)).toEqual({ status: "NO_MATCH" });
       }
     }
   });

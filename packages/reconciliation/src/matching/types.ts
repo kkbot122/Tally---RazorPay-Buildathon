@@ -71,3 +71,14 @@ export type OneToManyGroupedRuleResult =
     };
 
 export type OneToManyGroupedRuleInput = ExactReferenceRuleInput;
+
+export type ManyToOneGroupedRuleResult =
+  | { status: "MATCH"; bankRecordIds: string[]; ledgerRecordId: string; reasonCode: "GROUPED_MATCH" }
+  | { status: "NO_MATCH" }
+  | { status: "AMBIGUOUS"; candidateGroups: string[][] };
+
+export type ManyToOneGroupedRuleInput = {
+  ledgerRecordId: string;
+  records: RecordLookup;
+  usedRecords: UsedRecordState;
+};
