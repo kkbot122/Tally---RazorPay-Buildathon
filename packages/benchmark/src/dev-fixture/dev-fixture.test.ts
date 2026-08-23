@@ -2,6 +2,9 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import {
+  checkPairCompatibility,
+  createRecordLookup,
+  emptyUsedRecordState,
   normalizeCounterpartyForExactComparison,
   normalizeReference,
   parseBankCsv,
@@ -94,5 +97,46 @@ describe("20-case development fixture", () => {
     expect(normalizeCounterpartyForExactComparison(semantic.bankTransactions[0]!.counterparty)).not.toBe(
       normalizeCounterpartyForExactComparison(semantic.ledgerTransactions[0]!.counterparty),
     );
+  });
+
+  it("keeps hard compatibility separate from future matching decisions", () => {
+    const fixture = buildDevFixture();
+    const records = createRecordLookup(
+      fixture.cases.flatMap((benchmarkCase) => benchmarkCase.bankTransactions),
+      fixture.cases.flatMap((benchmarkCase) => benchmarkCase.ledgerTransactions),
+    );
+    const unused = emptyUsedRecordState();
+    const discrepancy = fixture.cases.find((benchmarkCase) => benchmarkCase.reasonCode === "AMOUNT_DISCREPANCY")!;
+    const conflicting = fixture.cases.find((benchmarkCase) => benchmarkCase.reasonCode === "CONFLICTING_RECORDS")!;
+    const semantic = fixture.cases.find((benchmarkCase) => benchmarkCase.category === "SEMANTIC")!;
+    const strongContext = fixture.cases.find((benchmarkCase) => benchmarkCase.category === "STRONG_CONTEXT")!;
+
+    expect(checkPairCompatibility({
+      bankRecordId: discrepancy.bankTransactions[0]!.bankTxnId,
+      ledgerRecordId: discrepancy.ledgerTransactions[0]!.ledgerTxnId,
+      records,
+      usedRecords: unused,
+    }).compatible).toBe(true);
+    expect(conflicting.bankTransactions[0]!.direction).toBe(conflicting.ledgerTransactions[0]!.direction);
+    expect(conflicting.bankTransactions[0]!.amount).toBe(conflicting.ledgerTransactions[0]!.amount);
+    expect(checkPairCompatibility({
+      bankRecordId: conflicting.bankTransactions[0]!.bankTxnId,
+      ledgerRecordId: conflicting.ledgerTransactions[0]!.ledgerTxnId,
+      records,
+      usedRecords: unused,
+    }).compatible).toBe(true);
+    expect(checkPairCompatibility({
+      bankRecordId: semantic.bankTransactions[0]!.bankTxnId,
+      ledgerRecordId: semantic.ledgerTransactions[0]!.ledgerTxnId,
+      records,
+      usedRecords: unused,
+    }).compatible).toBe(true);
+    expect(strongContext.bankTransactions[0]!.reference).toBeNull();
+    expect(checkPairCompatibility({
+      bankRecordId: strongContext.bankTransactions[0]!.bankTxnId,
+      ledgerRecordId: strongContext.ledgerTransactions[0]!.ledgerTxnId,
+      records,
+      usedRecords: unused,
+    }).compatible).toBe(true);
   });
 });

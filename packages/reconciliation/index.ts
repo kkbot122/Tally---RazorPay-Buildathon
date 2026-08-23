@@ -31,6 +31,26 @@ export {
   parseMoneyToPaise,
 } from "./src/normalization/index.js";
 
+export {
+  areCurrenciesCompatible,
+  areDirectionsCompatible,
+  bankRecordExists,
+  bankRecordIsUnused,
+  checkPairCompatibility,
+  createRecordLookup,
+  emptyUsedRecordState,
+  ledgerRecordExists,
+  ledgerRecordIsUnused,
+} from "./src/compatibility/index.js";
+
+export type {
+  CompatibilityFailureCode,
+  CompatibilityResult,
+  PairCompatibilityInput,
+  RecordLookup,
+  UsedRecordState,
+} from "./src/compatibility/index.js";
+
 export type {
   CsvSource,
   CsvValidationIssue,

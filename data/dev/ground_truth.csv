@@ -15,7 +15,7 @@ C013,B3300,L1454|L6080|L1660,RECONCILED,GROUPED_MATCH,
 C014,B1344|B1171,L8460,RECONCILED,GROUPED_MATCH,
 C015,B4821|B2401|B5772,L7408,RECONCILED,GROUPED_MATCH,
 C016,B8281,L8306,DISCREPANCY,AMOUNT_DISCREPANCY,"Related references and entities are present, but the amounts contradict without an explanatory record."
-C017,B7348,L8023,DISCREPANCY,CONFLICTING_RECORDS,The records share the event reference and amount but conflict on transaction direction.
+C017,B7348,L8023,DISCREPANCY,CONFLICTING_RECORDS,"The records retain compatible amount, currency, and direction evidence but conflict across their reference, counterparty, and descriptions."
 C018,B4669,,UNRESOLVED,MULTIPLE_PLAUSIBLE_CANDIDATES,Both ledger records expose identical observable evidence; no unique counterpart is truth-selected.
 C019,B9393,,UNRESOLVED,MULTIPLE_PLAUSIBLE_CANDIDATES,Both ledger records expose identical observable evidence; no unique counterpart is truth-selected.
 C020,B9938,,UNRESOLVED,NO_CANDIDATE,No compatible ledger representation is generated for this event.

@@ -1,19 +1,19 @@
 ledger_txn_id,accounting_date,maturity_date,amount,currency,direction,reference,counterparty,description,source,batch_id
-L8023,2026-09-15,2026-09-15,25000.00,INR,CREDIT,INV543,Zenith Services,Synthetic ledger transaction,Synthetic ERP,BATCH-001
+L8023,2026-09-12,2026-09-12,10000.00,INR,CREDIT,INV-313,Acme Private Limited,Receipt against invoice 312,Synthetic ERP,BATCH-001
 L1660,2026-09-07,2026-09-07,3112.50,INR,DEBIT,BATCH-INV813-3,Orion Foods Private Limited,Synthetic ledger transaction,Synthetic ERP,BATCH-INV813
 L9912,2026-09-03,2026-09-03,10000.00,INR,CREDIT,,Orion Foods Private Limited,Synthetic ledger transaction,Synthetic ERP,BATCH-001
 L6080,2026-09-07,2026-09-07,4357.50,INR,DEBIT,BATCH-INV813-2,Orion Foods Private Limited,Synthetic ledger transaction,Synthetic ERP,BATCH-INV813
 L1523,2026-08-15,2026-08-15,12450.00,INR,CREDIT,INV533,Nova Retail Private Limited,Synthetic ledger transaction,Synthetic ERP,BATCH-001
 L3107,2026-08-11,2026-08-11,4000.00,INR,CREDIT,BATCH-INV660-1,Orion Foods Private Limited,Synthetic ledger transaction,Synthetic ERP,BATCH-INV660
 L4176,2026-09-10,2026-09-10,12450.00,INR,DEBIT,INV233,Metro Supplies,Synthetic ledger transaction,Synthetic ERP,BATCH-001
-L3252,2026-09-12,2026-09-12,10000.00,INR,CREDIT,,Ambiguous Synthetic Entity,,Synthetic ERP,BATCH-001
+L3252,2026-08-15,2026-08-15,12450.00,INR,DEBIT,,Ambiguous Synthetic Entity,,Synthetic ERP,BATCH-001
 L1454,2026-09-07,2026-09-07,4980.00,INR,DEBIT,BATCH-INV813-1,Orion Foods Private Limited,Synthetic ledger transaction,Synthetic ERP,BATCH-INV813
 L2032,2026-08-05,2026-08-05,25000.00,INR,CREDIT,Invoice 948,Nova Retail Private Limited,Receipt against invoice #948,Synthetic ERP,BATCH-001
 L3733,2026-09-28,2026-10-02,10000.00,INR,CREDIT,,,Synthetic ledger transaction,Synthetic ERP,BATCH-001
-L3189,2026-08-15,2026-08-15,12450.00,INR,DEBIT,,Ambiguous Synthetic Entity,,Synthetic ERP,BATCH-001
+L3189,2026-08-11,2026-08-11,12450.00,INR,CREDIT,,Ambiguous Synthetic Entity,,Synthetic ERP,BATCH-001
 L1898,2026-09-28,2026-10-02,5000.00,INR,CREDIT,,,Synthetic ledger transaction,Synthetic ERP,BATCH-001
-L3563,2026-08-15,2026-08-15,12450.00,INR,DEBIT,,Ambiguous Synthetic Entity,,Synthetic ERP,BATCH-001
-L9264,2026-09-12,2026-09-12,10000.00,INR,CREDIT,,Ambiguous Synthetic Entity,,Synthetic ERP,BATCH-001
+L3563,2026-08-11,2026-08-11,12450.00,INR,CREDIT,,Ambiguous Synthetic Entity,,Synthetic ERP,BATCH-001
+L9264,2026-08-15,2026-08-15,12450.00,INR,DEBIT,,Ambiguous Synthetic Entity,,Synthetic ERP,BATCH-001
 L8460,2026-08-28,2026-08-28,9950.00,INR,CREDIT,BATCH-INV922,Orion Foods Private Limited,Synthetic ledger transaction,Synthetic ERP,BATCH-INV922
 L1681,2026-09-30,2026-09-30,25000.00,INR,CREDIT,INV735,Acme Private Limited,Synthetic ledger transaction,Synthetic ERP,BATCH-001
 L5836,2026-09-26,2026-09-26,25000.00,INR,CREDIT,INV904,Metro Supplies,Synthetic ledger transaction,Synthetic ERP,BATCH-001

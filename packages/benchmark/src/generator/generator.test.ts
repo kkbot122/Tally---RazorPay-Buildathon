@@ -82,7 +82,9 @@ describe("truth-first benchmark generator", () => {
     const conflicting = generateBenchmarkCase({ seed: 23, caseId: "C003", category: "DISCREPANCY" });
     expect(conflicting.reasonCode).toBe("CONFLICTING_RECORDS");
     expect(conflicting.bankTransactions[0]?.amount).toBe(conflicting.ledgerTransactions[0]?.amount);
-    expect(conflicting.bankTransactions[0]?.direction).not.toBe(conflicting.ledgerTransactions[0]?.direction);
+    expect(conflicting.bankTransactions[0]?.direction).toBe(conflicting.ledgerTransactions[0]?.direction);
+    expect(conflicting.bankTransactions[0]?.reference).not.toBe(conflicting.ledgerTransactions[0]?.reference);
+    expect(conflicting.bankTransactions[0]?.description).not.toBe(conflicting.ledgerTransactions[0]?.description);
   });
 
   it("uses canonical reason codes and keeps semantic references distinct after normalization", () => {

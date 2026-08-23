@@ -78,7 +78,8 @@ export function validateBenchmarkCase(benchmarkCase: BenchmarkCase): BenchmarkCa
       assert(benchmarkCase.bankTransactions[0]?.amount !== benchmarkCase.ledgerTransactions[0]?.amount, "amount discrepancy records must differ in amount");
     } else {
       assert(benchmarkCase.bankTransactions[0]?.amount === benchmarkCase.ledgerTransactions[0]?.amount, "conflicting records retain the same amount");
-      assert(benchmarkCase.bankTransactions[0]?.direction !== benchmarkCase.ledgerTransactions[0]?.direction, "conflicting records must differ in direction");
+      assert(benchmarkCase.bankTransactions[0]?.direction === benchmarkCase.ledgerTransactions[0]?.direction, "conflicting records must retain the same direction");
+      assert(benchmarkCase.bankTransactions[0]?.reference !== benchmarkCase.ledgerTransactions[0]?.reference, "conflicting records must differ in reference evidence");
     }
   }
 

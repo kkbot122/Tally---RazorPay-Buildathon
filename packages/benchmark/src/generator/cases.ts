@@ -94,9 +94,20 @@ const discrepancy: CaseBuilder = (context, caseId) => {
     const ledger = [makeLedger(context, event)];
     return { caseId, category: "DISCREPANCY", expectedOutcome: "DISCREPANCY", reasonCode: "AMOUNT_DISCREPANCY", bankTransactions: bank, ledgerTransactions: ledger, truth: emptyTruth(event, bank, ledger), notes: "Related references and entities are present, but the amounts contradict without an explanatory record." };
   }
-  const bank = [makeBank(context, event)];
-  const ledger = [makeLedger(context, event, { direction: event.direction === "CREDIT" ? "DEBIT" : "CREDIT" })];
-  return { caseId, category: "DISCREPANCY", expectedOutcome: "DISCREPANCY", reasonCode: "CONFLICTING_RECORDS", bankTransactions: bank, ledgerTransactions: ledger, truth: emptyTruth(event, bank, ledger), notes: "The records share the event reference and amount but conflict on transaction direction." };
+  const entity = chooseEntity(context);
+  const conflictingEvent = createEvent(context, entity);
+  const number = conflictingEvent.canonicalReference.replace("INV", "");
+  const bank = [makeBank(context, conflictingEvent, {
+    reference: `INV-${number}`,
+    counterparty: entity.variants[0] ?? entity.canonicalName,
+    description: `Payment for invoice ${number}`,
+  })];
+  const ledger = [makeLedger(context, conflictingEvent, {
+    reference: `INV-${Number(number) + 1}`,
+    counterparty: entity.canonicalName,
+    description: `Receipt against invoice ${number}`,
+  })];
+  return { caseId, category: "DISCREPANCY", expectedOutcome: "DISCREPANCY", reasonCode: "CONFLICTING_RECORDS", bankTransactions: bank, ledgerTransactions: ledger, truth: emptyTruth(conflictingEvent, bank, ledger), notes: "The records retain compatible amount, currency, and direction evidence but conflict across their reference, counterparty, and descriptions." };
 };
 
 const ambiguous: CaseBuilder = (context, caseId) => {
