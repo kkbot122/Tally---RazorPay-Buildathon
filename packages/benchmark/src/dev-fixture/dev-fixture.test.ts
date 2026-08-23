@@ -11,6 +11,7 @@ import {
   generateCandidates,
   buildReconciliationReasoningInput,
   verifyMatchProposal,
+  verifyNonMatchProposal,
   checkPairCompatibility,
   createRecordLookup,
   emptyUsedRecordState,
@@ -511,5 +512,82 @@ describe("20-case development fixture", () => {
     });
     expect(conflictingResult.status).toBe("REJECTED");
     expect(conflictingResult.status === "REJECTED" && conflictingResult.failures.map((failure) => failure.code)).toContain("CONFLICTING_EVIDENCE");
+  });
+
+  it("verifies T021 non-match proposals across the full development fixture", () => {
+    const fixture = buildDevFixture();
+    const records = createRecordLookup(
+      fixture.cases.flatMap((benchmarkCase) => benchmarkCase.bankTransactions),
+      fixture.cases.flatMap((benchmarkCase) => benchmarkCase.ledgerTransactions),
+    );
+    const deterministic = runDeterministicReconciliation({ records });
+    const candidateSetFor = (side: "BANK" | "LEDGER", recordId: string, requiredCandidateIds?: string[]) => generateCandidates({
+      primary: { side, recordId },
+      records,
+      usedRecords: deterministic.usedRecords,
+      requiredCandidateIds,
+    });
+    const evidence = (recordIds: string[]) => [{ statement: "The supplied records provide relevant evidence.", source: "CROSS_RECORD" as const, recordIds }];
+
+    for (const benchmarkCase of fixture.cases.filter((candidate) => candidate.category === "TIMING")) {
+      const ledgerId = benchmarkCase.ledgerTransactions[0]!.ledgerTxnId;
+      const result = verifyNonMatchProposal({
+        proposal: { proposedOutcome: "TIMING_DIFFERENCE", bankRecordIds: [], ledgerRecordIds: [ledgerId], confidence: "HIGH", evidence: evidence([ledgerId]), conflictingEvidence: [], reason: "The supplied maturity date is future-dated." },
+        primary: { side: "LEDGER", recordId: ledgerId },
+        candidateSet: candidateSetFor("LEDGER", ledgerId),
+        records,
+        usedRecords: deterministic.usedRecords,
+        runContext: { asOfDate: fixture.asOfDate },
+      });
+      expect(result).toMatchObject({ outcome: "EXPLAINED_OUTSTANDING", reasonCode: "TIMING_DIFFERENCE" });
+    }
+
+    const amountCase = fixture.cases.find((candidate) => candidate.reasonCode === "AMOUNT_DISCREPANCY")!;
+    const amountBankId = amountCase.bankTransactions[0]!.bankTxnId;
+    const amountLedgerId = amountCase.truth.ledgerRecordIds[0]!;
+    expect(verifyNonMatchProposal({
+      proposal: { proposedOutcome: "DISCREPANCY", bankRecordIds: [amountBankId], ledgerRecordIds: [amountLedgerId], confidence: "MEDIUM", evidence: evidence([amountBankId, amountLedgerId]), conflictingEvidence: [], reason: "The supplied amounts differ." },
+      primary: { side: "BANK", recordId: amountBankId },
+      candidateSet: candidateSetFor("BANK", amountBankId),
+      records,
+      usedRecords: deterministic.usedRecords,
+      runContext: { asOfDate: fixture.asOfDate },
+    })).toMatchObject({ outcome: "DISCREPANCY", reasonCode: "AMOUNT_DISCREPANCY" });
+
+    const conflictCase = fixture.cases.find((candidate) => candidate.reasonCode === "CONFLICTING_RECORDS")!;
+    const conflictBankId = conflictCase.bankTransactions[0]!.bankTxnId;
+    const conflictLedgerId = conflictCase.truth.ledgerRecordIds[0]!;
+    expect(verifyNonMatchProposal({
+      proposal: { proposedOutcome: "DISCREPANCY", bankRecordIds: [conflictBankId], ledgerRecordIds: [conflictLedgerId], confidence: "HIGH", evidence: evidence([conflictBankId, conflictLedgerId]), conflictingEvidence: [{ statement: "The supplied references conflict.", source: "CROSS_RECORD", recordIds: [conflictBankId, conflictLedgerId] }], reason: "The records contain conflicting evidence." },
+      primary: { side: "BANK", recordId: conflictBankId },
+      candidateSet: candidateSetFor("BANK", conflictBankId),
+      records,
+      usedRecords: deterministic.usedRecords,
+      runContext: { asOfDate: fixture.asOfDate },
+    })).toMatchObject({ outcome: "DISCREPANCY", reasonCode: "CONFLICTING_RECORDS" });
+
+    const ambiguous = fixture.cases.find((candidate) => candidate.category === "AMBIGUOUS")!;
+    const ambiguousBankId = ambiguous.bankTransactions[0]!.bankTxnId;
+    const ambiguousDecision = deterministic.decisions.find((decision) => decision.status === "NEEDS_REASONING" && decision.bankRecordIds.includes(ambiguousBankId));
+    expect(verifyNonMatchProposal({
+      proposal: { proposedOutcome: "INSUFFICIENT_EVIDENCE", bankRecordIds: [ambiguousBankId], ledgerRecordIds: ambiguousDecision?.ledgerRecordIds ?? [], confidence: "LOW", evidence: evidence([ambiguousBankId, ...(ambiguousDecision?.ledgerRecordIds ?? [])]), conflictingEvidence: [], reason: "Several candidates remain plausible." },
+      primary: { side: "BANK", recordId: ambiguousBankId },
+      candidateSet: candidateSetFor("BANK", ambiguousBankId, ambiguousDecision?.status === "NEEDS_REASONING" ? ambiguousDecision.ledgerRecordIds : undefined),
+      records,
+      usedRecords: deterministic.usedRecords,
+      runContext: { asOfDate: fixture.asOfDate },
+      reasoningContext: { deterministicReason: "MULTIPLE_CANDIDATES" },
+    })).toMatchObject({ outcome: "UNRESOLVED", reasonCode: "MULTIPLE_PLAUSIBLE_CANDIDATES" });
+
+    const noCandidate = fixture.cases.find((candidate) => candidate.category === "NO_CANDIDATE")!;
+    const noCandidateBankId = noCandidate.bankTransactions[0]!.bankTxnId;
+    expect(verifyNonMatchProposal({
+      proposal: { proposedOutcome: "INSUFFICIENT_EVIDENCE", bankRecordIds: [noCandidateBankId], ledgerRecordIds: [], confidence: "LOW", evidence: evidence([noCandidateBankId]), conflictingEvidence: [], reason: "No supplied candidate is available." },
+      primary: { side: "BANK", recordId: noCandidateBankId },
+      candidateSet: candidateSetFor("BANK", noCandidateBankId),
+      records,
+      usedRecords: deterministic.usedRecords,
+      runContext: { asOfDate: fixture.asOfDate },
+    })).toMatchObject({ outcome: "UNRESOLVED", reasonCode: "NO_CANDIDATE" });
   });
 });
