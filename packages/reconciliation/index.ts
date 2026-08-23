@@ -43,8 +43,13 @@ export {
   ledgerRecordIsUnused,
 } from "./src/compatibility/index.js";
 
-export { applyExactReferenceRule } from "./src/matching/index.js";
-export type { ExactReferenceRuleInput, ExactReferenceRuleResult } from "./src/matching/index.js";
+export { applyExactReferenceRule, applyNormalizedReferenceRule, differenceInCalendarDays } from "./src/matching/index.js";
+export type {
+  ExactReferenceRuleInput,
+  ExactReferenceRuleResult,
+  NormalizedReferenceRuleInput,
+  NormalizedReferenceRuleResult,
+} from "./src/matching/index.js";
 
 export type {
   CompatibilityFailureCode,

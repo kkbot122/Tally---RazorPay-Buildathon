@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 
 import {
   applyExactReferenceRule,
+  applyNormalizedReferenceRule,
   checkPairCompatibility,
   createRecordLookup,
   emptyUsedRecordState,
@@ -165,6 +166,31 @@ describe("20-case development fixture", () => {
     for (const category of ["NORMALIZED_REFERENCE", "STRONG_CONTEXT", "SEMANTIC", "DISCREPANCY", "AMBIGUOUS"] as const) {
       for (const benchmarkCase of fixture.cases.filter((candidate) => candidate.category === category)) {
         expect(apply(benchmarkCase)).toEqual({ status: "NO_MATCH" });
+      }
+    }
+  });
+
+  it("applies R2 across the full fixture with explicit rule ownership", () => {
+    const fixture = buildDevFixture();
+    const records = createRecordLookup(
+      fixture.cases.flatMap((benchmarkCase) => benchmarkCase.bankTransactions),
+      fixture.cases.flatMap((benchmarkCase) => benchmarkCase.ledgerTransactions),
+    );
+    const usedRecords = emptyUsedRecordState();
+    const apply = (bankRecordId: string) => applyNormalizedReferenceRule({ bankRecordId, records, usedRecords });
+
+    for (const benchmarkCase of fixture.cases.filter((candidate) => candidate.category === "NORMALIZED_REFERENCE")) {
+      expect(apply(benchmarkCase.bankTransactions[0]!.bankTxnId)).toEqual({
+        status: "MATCH",
+        bankRecordId: benchmarkCase.bankTransactions[0]!.bankTxnId,
+        ledgerRecordId: benchmarkCase.truth.ledgerRecordIds[0],
+        reasonCode: "NORMALIZED_REFERENCE_MATCH",
+      });
+    }
+
+    for (const benchmarkCase of fixture.cases.filter((candidate) => candidate.category !== "NORMALIZED_REFERENCE")) {
+      for (const bankRecord of benchmarkCase.bankTransactions) {
+        expect(apply(bankRecord.bankTxnId)).toEqual({ status: "NO_MATCH" });
       }
     }
   });

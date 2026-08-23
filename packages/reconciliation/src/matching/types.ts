@@ -20,3 +20,20 @@ export type ExactReferenceRuleInput = {
   records: RecordLookup;
   usedRecords: UsedRecordState;
 };
+
+export type NormalizedReferenceRuleResult =
+  | {
+      status: "MATCH";
+      bankRecordId: string;
+      ledgerRecordId: string;
+      reasonCode: "NORMALIZED_REFERENCE_MATCH";
+    }
+  | {
+      status: "NO_MATCH";
+    }
+  | {
+      status: "AMBIGUOUS";
+      candidateLedgerRecordIds: string[];
+    };
+
+export type NormalizedReferenceRuleInput = ExactReferenceRuleInput;
