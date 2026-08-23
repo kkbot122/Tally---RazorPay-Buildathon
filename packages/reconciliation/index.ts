@@ -98,8 +98,10 @@ export type {
 
 export {
   AgentProposalSchema,
+  buildReconciliationReasoningInput,
   DEFAULT_REASONING_MODEL,
   OpenAIResponsesAdapter,
+  RECONCILIATION_AGENT_INSTRUCTIONS,
   ReasoningAdapterError,
 } from "./src/agent/index.js";
 export type {
@@ -108,6 +110,7 @@ export type {
   ReasoningModelAdapter,
   ReasoningModelInput,
 } from "./src/agent/index.js";
+export type { BuildReasoningPromptInput, ReasoningPrimary } from "./src/agent/index.js";
 
 export type {
   CsvSource,

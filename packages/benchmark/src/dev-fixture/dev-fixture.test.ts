@@ -9,6 +9,7 @@ import {
   applyManyToOneGroupedRule,
   runDeterministicReconciliation,
   generateCandidates,
+  buildReconciliationReasoningInput,
   checkPairCompatibility,
   createRecordLookup,
   emptyUsedRecordState,
@@ -370,5 +371,62 @@ describe("20-case development fixture", () => {
     for (const benchmarkCase of fixture.cases.filter((candidate) => candidate.category === "NO_CANDIDATE")) {
       expect(candidateSetFor(benchmarkCase).candidates).toEqual([]);
     }
+  });
+
+  it("builds T019 prompts from runtime reasoning context across difficult fixture cases", () => {
+    const fixture = buildDevFixture();
+    const records = createRecordLookup(
+      fixture.cases.flatMap((benchmarkCase) => benchmarkCase.bankTransactions),
+      fixture.cases.flatMap((benchmarkCase) => benchmarkCase.ledgerTransactions),
+    );
+    const deterministic = runDeterministicReconciliation({ records });
+    const promptFor = (benchmarkCase: (typeof fixture.cases)[number], side: "BANK" | "LEDGER", requiredCandidateIds?: string[]) => {
+      const primary = side === "BANK"
+        ? { side: "BANK" as const, record: benchmarkCase.bankTransactions[0]! }
+        : { side: "LEDGER" as const, record: benchmarkCase.ledgerTransactions[0]! };
+      const candidateSet = generateCandidates({
+        primary: side === "BANK"
+          ? { side, recordId: benchmarkCase.bankTransactions[0]!.bankTxnId }
+          : { side, recordId: benchmarkCase.ledgerTransactions[0]!.ledgerTxnId },
+        records,
+        usedRecords: deterministic.usedRecords,
+        requiredCandidateIds,
+      });
+      return buildReconciliationReasoningInput({
+        primary,
+        candidateSet,
+        records,
+        runContext: { asOfDate: fixture.asOfDate },
+      }).input;
+    };
+
+    const semantic = fixture.cases.find((candidate) => candidate.category === "SEMANTIC")!;
+    const semanticPrompt = promptFor(semantic, "BANK");
+    expect(semanticPrompt).toContain(semantic.truth.ledgerRecordIds[0]!);
+    expect(semanticPrompt).toContain(semantic.bankTransactions[0]!.description!);
+    expect(semanticPrompt).toContain('"normalizedReferenceEqual":false');
+    expect(semanticPrompt).not.toContain('"category":"SEMANTIC"');
+
+    const discrepancy = fixture.cases.find((candidate) => candidate.reasonCode === "AMOUNT_DISCREPANCY")!;
+    const discrepancyPrompt = promptFor(discrepancy, "BANK");
+    expect(discrepancyPrompt).toContain(discrepancy.truth.ledgerRecordIds[0]!);
+    expect(discrepancyPrompt).toContain('"exactAmount":false');
+    expect(discrepancyPrompt).toContain("amountDeltaPaise");
+    expect(discrepancyPrompt).not.toContain('"expectedOutcome":"DISCREPANCY"');
+
+    const ambiguous = fixture.cases.find((candidate) => candidate.category === "AMBIGUOUS")!;
+    const ambiguousDecision = deterministic.decisions.find((decision) =>
+      decision.status === "NEEDS_REASONING" && decision.bankRecordIds.includes(ambiguous.bankTransactions[0]!.bankTxnId),
+    );
+    const ambiguousPrompt = promptFor(ambiguous, "BANK", ambiguousDecision?.status === "NEEDS_REASONING" ? ambiguousDecision.ledgerRecordIds : undefined);
+    for (const ledgerRecord of ambiguous.ledgerTransactions) expect(ambiguousPrompt).toContain(ledgerRecord.ledgerTxnId);
+    expect(ambiguousPrompt).toContain("Do not choose the first or lowest-ID candidate");
+
+    const timing = fixture.cases.find((candidate) => candidate.category === "TIMING")!;
+    const timingPrompt = promptFor(timing, "LEDGER");
+    expect(timingPrompt).toContain(timing.ledgerTransactions[0]!.maturityDate!);
+    expect(timingPrompt).toContain(fixture.asOfDate);
+    expect(timingPrompt).toContain("For TIMING_DIFFERENCE, cite supplied timing evidence");
+    expect(timingPrompt).not.toContain('"expectedOutcome":"EXPLAINED_OUTSTANDING"');
   });
 });
