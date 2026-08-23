@@ -43,6 +43,17 @@ export {
   ledgerRecordIsUnused,
 } from "./src/compatibility/index.js";
 
+export { generateCandidates, MAX_CANDIDATES_PER_PRIMARY, computePairFacts, selectCandidateSignals, selectCandidateTier } from "./src/candidates/index.js";
+export type {
+  CandidateFacts,
+  CandidatePrimary,
+  CandidateRecord,
+  CandidateSelectionTier,
+  CandidateSet,
+  CandidateSignal,
+  GenerateCandidatesInput,
+} from "./src/candidates/index.js";
+
 export {
   applyExactReferenceRule,
   applyNormalizedReferenceRule,

@@ -1,0 +1,1 @@
+export const MAX_CANDIDATES_PER_PRIMARY = 8;

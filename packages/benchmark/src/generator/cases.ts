@@ -52,7 +52,7 @@ const semantic: CaseBuilder = (context, caseId) => {
 const timing: CaseBuilder = (context, caseId) => {
   const event = { ...createEvent(context), baseDate: "2026-09-28" };
   const expectedDate = dateAfter(event.baseDate, 4);
-  const ledger = [makeLedger(context, event, { maturityDate: expectedDate, reference: null, counterparty: null })];
+  const ledger = [makeLedger(context, event, { maturityDate: expectedDate, reference: null, counterparty: null, batchId: null })];
   return {
     caseId,
     category: "TIMING",
@@ -122,7 +122,7 @@ const ambiguous: CaseBuilder = (context, caseId) => {
 
 const noCandidate: CaseBuilder = (context, caseId) => {
   const event = createEvent(context);
-  const bank = [makeBank(context, event, { reference: "XYZ991", counterparty: null, description: null })];
+  const bank = [makeBank(context, event, { reference: "XYZ991", counterparty: null, description: null, batchId: null })];
   return { caseId, category: "NO_CANDIDATE", expectedOutcome: "UNRESOLVED", reasonCode: "NO_CANDIDATE", bankTransactions: bank, ledgerTransactions: [], truth: emptyTruth(event, bank, []), notes: "No compatible ledger representation is generated for this event." };
 };
 

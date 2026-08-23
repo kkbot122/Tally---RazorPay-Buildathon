@@ -8,6 +8,7 @@ import {
   applyOneToManyGroupedRule,
   applyManyToOneGroupedRule,
   runDeterministicReconciliation,
+  generateCandidates,
   checkPairCompatibility,
   createRecordLookup,
   emptyUsedRecordState,
@@ -326,5 +327,48 @@ describe("20-case development fixture", () => {
     expect(result.usedRecords.bankRecordIds).toEqual(usedBanks);
     expect(result.usedRecords.ledgerRecordIds).toEqual(usedLedgers);
     expect(result.decisions.filter((decision) => decision.status === "NEEDS_REASONING").length).toBeGreaterThan(0);
+  });
+
+  it("generates bounded reasoning candidates with full-fixture recall", () => {
+    const fixture = buildDevFixture();
+    const records = createRecordLookup(
+      fixture.cases.flatMap((benchmarkCase) => benchmarkCase.bankTransactions),
+      fixture.cases.flatMap((benchmarkCase) => benchmarkCase.ledgerTransactions),
+    );
+    const deterministic = runDeterministicReconciliation({ records });
+    const candidateSetFor = (benchmarkCase: (typeof fixture.cases)[number], side: "BANK" | "LEDGER" = "BANK", requiredCandidateIds?: string[]) => generateCandidates({
+      primary: side === "BANK"
+        ? { side, recordId: benchmarkCase.bankTransactions[0]!.bankTxnId }
+        : { side, recordId: benchmarkCase.ledgerTransactions[0]!.ledgerTxnId },
+      records,
+      usedRecords: deterministic.usedRecords,
+      requiredCandidateIds,
+    });
+
+    for (const category of ["SEMANTIC", "DISCREPANCY"] as const) {
+      for (const benchmarkCase of fixture.cases.filter((candidate) => candidate.category === category)) {
+        const result = candidateSetFor(benchmarkCase);
+        expect(result.candidates.map((candidate) => candidate.recordId)).toContain(benchmarkCase.truth.ledgerRecordIds[0]);
+      }
+    }
+
+    for (const benchmarkCase of fixture.cases.filter((candidate) => candidate.category === "AMBIGUOUS")) {
+      const decision = deterministic.decisions.find((candidate) =>
+        candidate.status === "NEEDS_REASONING"
+        && candidate.bankRecordIds.includes(benchmarkCase.bankTransactions[0]!.bankTxnId),
+      );
+      expect(decision?.status).toBe("NEEDS_REASONING");
+      const result = candidateSetFor(benchmarkCase, "BANK", decision?.status === "NEEDS_REASONING" ? decision.ledgerRecordIds : undefined);
+      expect(result.candidates.map((candidate) => candidate.recordId)).toEqual(
+        expect.arrayContaining(benchmarkCase.truth.plausibleLedgerRecordIds ?? benchmarkCase.truth.ledgerRecordIds),
+      );
+    }
+
+    for (const benchmarkCase of fixture.cases.filter((candidate) => candidate.category === "TIMING")) {
+      expect(candidateSetFor(benchmarkCase, "LEDGER").candidates).toEqual([]);
+    }
+    for (const benchmarkCase of fixture.cases.filter((candidate) => candidate.category === "NO_CANDIDATE")) {
+      expect(candidateSetFor(benchmarkCase).candidates).toEqual([]);
+    }
   });
 });
