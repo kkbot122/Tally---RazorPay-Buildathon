@@ -5,6 +5,7 @@ import {
   applyExactReferenceRule,
   applyNormalizedReferenceRule,
   applyStrongContextRule,
+  applyOneToManyGroupedRule,
   checkPairCompatibility,
   createRecordLookup,
   emptyUsedRecordState,
@@ -222,6 +223,35 @@ describe("20-case development fixture", () => {
     }
 
     for (const benchmarkCase of fixture.cases.filter((candidate) => candidate.category !== "STRONG_CONTEXT" && candidate.category !== "AMBIGUOUS")) {
+      for (const bankRecord of benchmarkCase.bankTransactions) {
+        expect(apply(bankRecord.bankTxnId)).toEqual({ status: "NO_MATCH" });
+      }
+    }
+  });
+
+  it("applies R4 only to grouped one-bank-to-many-ledger cases", () => {
+    const fixture = buildDevFixture();
+    const records = createRecordLookup(
+      fixture.cases.flatMap((benchmarkCase) => benchmarkCase.bankTransactions),
+      fixture.cases.flatMap((benchmarkCase) => benchmarkCase.ledgerTransactions),
+    );
+    const usedRecords = emptyUsedRecordState();
+    const apply = (bankRecordId: string) => applyOneToManyGroupedRule({ bankRecordId, records, usedRecords });
+
+    for (const benchmarkCase of fixture.cases.filter((candidate) => candidate.category === "GROUPED_ONE_TO_MANY")) {
+      const bankRecordId = benchmarkCase.bankTransactions[0]!.bankTxnId;
+      expect(applyExactReferenceRule({ bankRecordId, records, usedRecords })).toEqual({ status: "NO_MATCH" });
+      expect(applyNormalizedReferenceRule({ bankRecordId, records, usedRecords })).toEqual({ status: "NO_MATCH" });
+      expect(applyStrongContextRule({ bankRecordId, records, usedRecords })).toEqual({ status: "NO_MATCH" });
+      expect(apply(bankRecordId)).toEqual({
+        status: "MATCH",
+        bankRecordId,
+        ledgerRecordIds: [...benchmarkCase.truth.ledgerRecordIds].sort(),
+        reasonCode: "GROUPED_MATCH",
+      });
+    }
+
+    for (const benchmarkCase of fixture.cases.filter((candidate) => candidate.category !== "GROUPED_ONE_TO_MANY")) {
       for (const bankRecord of benchmarkCase.bankTransactions) {
         expect(apply(bankRecord.bankTxnId)).toEqual({ status: "NO_MATCH" });
       }

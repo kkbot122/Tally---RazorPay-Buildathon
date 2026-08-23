@@ -43,7 +43,13 @@ export {
   ledgerRecordIsUnused,
 } from "./src/compatibility/index.js";
 
-export { applyExactReferenceRule, applyNormalizedReferenceRule, applyStrongContextRule, differenceInCalendarDays } from "./src/matching/index.js";
+export {
+  applyExactReferenceRule,
+  applyNormalizedReferenceRule,
+  applyOneToManyGroupedRule,
+  applyStrongContextRule,
+  differenceInCalendarDays,
+} from "./src/matching/index.js";
 export type {
   ExactReferenceRuleInput,
   ExactReferenceRuleResult,
@@ -51,6 +57,8 @@ export type {
   NormalizedReferenceRuleResult,
   StrongContextRuleInput,
   StrongContextRuleResult,
+  OneToManyGroupedRuleInput,
+  OneToManyGroupedRuleResult,
 } from "./src/matching/index.js";
 
 export type {

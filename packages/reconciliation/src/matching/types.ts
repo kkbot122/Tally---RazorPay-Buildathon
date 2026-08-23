@@ -54,3 +54,20 @@ export type StrongContextRuleResult =
     };
 
 export type StrongContextRuleInput = ExactReferenceRuleInput;
+
+export type OneToManyGroupedRuleResult =
+  | {
+      status: "MATCH";
+      bankRecordId: string;
+      ledgerRecordIds: string[];
+      reasonCode: "GROUPED_MATCH";
+    }
+  | {
+      status: "NO_MATCH";
+    }
+  | {
+      status: "AMBIGUOUS";
+      candidateGroups: string[][];
+    };
+
+export type OneToManyGroupedRuleInput = ExactReferenceRuleInput;
