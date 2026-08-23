@@ -37,3 +37,20 @@ export type NormalizedReferenceRuleResult =
     };
 
 export type NormalizedReferenceRuleInput = ExactReferenceRuleInput;
+
+export type StrongContextRuleResult =
+  | {
+      status: "MATCH";
+      bankRecordId: string;
+      ledgerRecordId: string;
+      reasonCode: "COUNTERPARTY_MATCH";
+    }
+  | {
+      status: "NO_MATCH";
+    }
+  | {
+      status: "AMBIGUOUS";
+      candidateLedgerRecordIds: string[];
+    };
+
+export type StrongContextRuleInput = ExactReferenceRuleInput;
