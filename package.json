@@ -1,0 +1,13 @@
+{
+  "name": "finance-reconciliation-agent",
+  "private": true,
+  "packageManager": "pnpm@10.15.0",
+  "scripts": {
+    "typecheck": "pnpm -r typecheck",
+    "dev:web": "pnpm --filter @tally/web dev",
+    "dev:api": "pnpm --filter @tally/api dev"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.3"
+  }
+}
