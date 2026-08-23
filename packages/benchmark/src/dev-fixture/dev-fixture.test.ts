@@ -7,6 +7,7 @@ import {
   applyStrongContextRule,
   applyOneToManyGroupedRule,
   applyManyToOneGroupedRule,
+  runDeterministicReconciliation,
   checkPairCompatibility,
   createRecordLookup,
   emptyUsedRecordState,
@@ -289,5 +290,41 @@ describe("20-case development fixture", () => {
         expect(apply(ledgerRecord.ledgerTxnId)).toEqual({ status: "NO_MATCH" });
       }
     }
+  });
+
+  it("runs the full deterministic ladder and auto-reconciles only the 11 safe cases", () => {
+    const fixture = buildDevFixture();
+    const records = createRecordLookup(
+      fixture.cases.flatMap((benchmarkCase) => benchmarkCase.bankTransactions),
+      fixture.cases.flatMap((benchmarkCase) => benchmarkCase.ledgerTransactions),
+    );
+    const result = runDeterministicReconciliation({ records });
+    const auto = result.decisions.filter((decision) => decision.status === "AUTO_RECONCILED");
+
+    expect(auto).toHaveLength(11);
+    expect(new Map(auto.map((decision) => [decision.rule, (auto.filter((candidate) => candidate.rule === decision.rule).length)]) )).toEqual(new Map([
+      ["R1_EXACT_REFERENCE", 3], ["R2_NORMALIZED_REFERENCE", 2], ["R3_STRONG_CONTEXT", 2],
+      ["R4_ONE_TO_MANY_GROUPED", 2], ["R5_MANY_TO_ONE_GROUPED", 2],
+    ]));
+    expect(new Map(auto.map((decision) => [decision.reasonCode, auto.filter((candidate) => candidate.reasonCode === decision.reasonCode).length]))).toEqual(new Map([
+      ["EXACT_MATCH", 3], ["NORMALIZED_REFERENCE_MATCH", 2], ["COUNTERPARTY_MATCH", 2], ["GROUPED_MATCH", 4],
+    ]));
+
+    const truthCases = fixture.cases.filter((benchmarkCase) => ["EXACT", "NORMALIZED_REFERENCE", "STRONG_CONTEXT", "GROUPED_ONE_TO_MANY", "GROUPED_MANY_TO_ONE"].includes(benchmarkCase.category));
+    for (const decision of auto) {
+      expect(truthCases.some((benchmarkCase) =>
+        [...decision.bankRecordIds].sort().join("|") === [...benchmarkCase.truth.bankRecordIds].sort().join("|")
+        && [...decision.ledgerRecordIds].sort().join("|") === [...benchmarkCase.truth.ledgerRecordIds].sort().join("|")
+        && decision.reasonCode === benchmarkCase.reasonCode,
+      )).toBe(true);
+    }
+
+    const usedBanks = new Set(auto.flatMap((decision) => decision.bankRecordIds));
+    const usedLedgers = new Set(auto.flatMap((decision) => decision.ledgerRecordIds));
+    expect(usedBanks.size).toBe(auto.flatMap((decision) => decision.bankRecordIds).length);
+    expect(usedLedgers.size).toBe(auto.flatMap((decision) => decision.ledgerRecordIds).length);
+    expect(result.usedRecords.bankRecordIds).toEqual(usedBanks);
+    expect(result.usedRecords.ledgerRecordIds).toEqual(usedLedgers);
+    expect(result.decisions.filter((decision) => decision.status === "NEEDS_REASONING").length).toBeGreaterThan(0);
   });
 });

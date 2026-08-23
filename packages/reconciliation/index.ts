@@ -64,6 +64,19 @@ export type {
   ManyToOneGroupedRuleResult,
 } from "./src/matching/index.js";
 
+export { runDeterministicReconciliation } from "./src/deterministic/index.js";
+export type {
+  AutoReconciledDecision,
+  DeterministicDecision,
+  DeterministicReason,
+  DeterministicReconciliationInput,
+  DeterministicReconciliationResult,
+  DeterministicRuleEvent,
+  DeterministicRuleEventType,
+  DeterministicRuleId,
+  NeedsReasoningDecision,
+} from "./src/deterministic/index.js";
+
 export type {
   CompatibilityFailureCode,
   CompatibilityResult,
