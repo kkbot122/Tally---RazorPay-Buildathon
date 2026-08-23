@@ -1,7 +1,12 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-import { parseBankCsv, parseLedgerCsv } from "@tally/reconciliation";
+import {
+  normalizeCounterpartyForExactComparison,
+  normalizeReference,
+  parseBankCsv,
+  parseLedgerCsv,
+} from "@tally/reconciliation";
 import { describe, expect, it } from "vitest";
 
 import { buildDevFixture, DEV_FIXTURE_COMPOSITION } from "./index.js";
@@ -69,5 +74,25 @@ describe("20-case development fixture", () => {
     const ledgerNumbers = caseLedgerOrder.map((id) => Number(id.slice(1)));
     expect(bankNumbers).not.toEqual(ledgerNumbers);
     expect(new Set(bankNumbers.map((value, index) => value - (ledgerNumbers[index] ?? 0))).size).toBeGreaterThan(1);
+  });
+
+  it("preserves the normalization boundary across benchmark categories", () => {
+    const fixture = buildDevFixture();
+    const normalizedReference = fixture.cases.find((benchmarkCase) => benchmarkCase.category === "NORMALIZED_REFERENCE")!;
+    const strongContext = fixture.cases.find((benchmarkCase) => benchmarkCase.category === "STRONG_CONTEXT")!;
+    const semantic = fixture.cases.find((benchmarkCase) => benchmarkCase.category === "SEMANTIC")!;
+
+    expect(normalizeReference(normalizedReference.bankTransactions[0]!.reference)).toBe(
+      normalizeReference(normalizedReference.ledgerTransactions[0]!.reference),
+    );
+    expect(normalizeCounterpartyForExactComparison(strongContext.bankTransactions[0]!.counterparty)).toBe(
+      normalizeCounterpartyForExactComparison(strongContext.ledgerTransactions[0]!.counterparty),
+    );
+    expect(normalizeReference(semantic.bankTransactions[0]!.reference)).not.toBe(
+      normalizeReference(semantic.ledgerTransactions[0]!.reference),
+    );
+    expect(normalizeCounterpartyForExactComparison(semantic.bankTransactions[0]!.counterparty)).not.toBe(
+      normalizeCounterpartyForExactComparison(semantic.ledgerTransactions[0]!.counterparty),
+    );
   });
 });

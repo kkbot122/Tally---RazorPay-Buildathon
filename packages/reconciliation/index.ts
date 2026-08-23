@@ -21,6 +21,16 @@ export {
   parseLedgerCsv,
 } from "./src/parsing/index.js";
 
+export {
+  NormalizationError,
+  normalizeCounterpartyForExactComparison,
+  normalizeCurrency,
+  normalizeDate,
+  normalizeOptionalDate,
+  normalizeReference,
+  parseMoneyToPaise,
+} from "./src/normalization/index.js";
+
 export type {
   CsvSource,
   CsvValidationIssue,
