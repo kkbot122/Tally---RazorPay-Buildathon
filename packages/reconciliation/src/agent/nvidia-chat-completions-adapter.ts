@@ -17,6 +17,7 @@ Return exactly one JSON object with these keys and no wrapper object:
   "reason": string
 }
 Do not use snake_case keys. Do not put the proposal under another key. Evidence must be an array of objects, not strings.
+Evidence must contain at least one item, even for INSUFFICIENT_EVIDENCE. When there is no reliable support, use one explicit insufficiency item with source DETERMINISTIC, kind DETERMINISTIC, and the relevant supplied record IDs; do not return an empty evidence array.
 Every evidence and conflictingEvidence object must include a non-empty recordIds array containing the exact record IDs that support that specific statement. Never omit recordIds, and never put record IDs only in the top-level bankRecordIds or ledgerRecordIds fields.
 `;
 
@@ -49,7 +50,10 @@ export class NvidiaChatCompletionsAdapter implements ReasoningModelAdapter {
       try {
         const request = {
           model: this.model,
-          messages: [{ role: "user", content: instruction }],
+          messages: [
+            { role: "system", content: NVIDIA_PROPOSAL_FORMAT },
+            { role: "user", content: instruction },
+          ],
           response_format: { type: "json_object" },
           temperature: 0,
           max_tokens: 16384,
@@ -87,7 +91,7 @@ export class NvidiaChatCompletionsAdapter implements ReasoningModelAdapter {
       return parsed.data;
     };
 
-    const instruction = `${input.input}\n${NVIDIA_PROPOSAL_FORMAT}`;
+    const instruction = input.input;
     try {
       return parseProposal(await requestProposal(instruction));
     } catch (error) {

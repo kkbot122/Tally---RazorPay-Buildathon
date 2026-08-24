@@ -76,7 +76,10 @@ describe("NvidiaChatCompletionsAdapter", () => {
     await expect(adapter.generateProposal({ input: "input" })).resolves.toEqual(proposal);
     expect(create).toHaveBeenCalledWith(expect.objectContaining({
       model: DEFAULT_NVIDIA_REASONING_MODEL,
-      messages: [{ role: "user", content: expect.stringContaining("input") }],
+      messages: [
+        { role: "system", content: expect.stringContaining("recordIds") },
+        { role: "user", content: "input" },
+      ],
       response_format: { type: "json_object" },
       max_tokens: 16384,
       reasoning_effort: "none",
@@ -100,7 +103,7 @@ describe("NvidiaChatCompletionsAdapter", () => {
 
     await expect(adapter.generateProposal({ input: "input" })).resolves.toEqual(proposal);
     expect(create).toHaveBeenCalledTimes(2);
-    expect((create.mock.calls[1]![0] as { messages: [{ content: string }] }).messages[0].content).toContain("recordIds");
+    expect((create.mock.calls[1]![0] as { messages: [{ content: string }, { content: string }] }).messages[0].content).toContain("recordIds");
   });
 
   it("uses Nemotron's chat-template thinking switch instead of DeepSeek reasoning_effort", async () => {
