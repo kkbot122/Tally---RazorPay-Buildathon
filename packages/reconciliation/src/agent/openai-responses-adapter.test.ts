@@ -89,4 +89,17 @@ describe("NvidiaChatCompletionsAdapter", () => {
 
     await expect(adapter.generateProposal({ input: "input" })).rejects.toMatchObject({ code: "AI_SCHEMA_ERROR" });
   });
+
+  it("uses Nemotron's chat-template thinking switch instead of DeepSeek reasoning_effort", async () => {
+    const create = vi.fn().mockResolvedValue({ choices: [{ message: { content: JSON.stringify(proposal) } }] });
+    const adapter = new NvidiaChatCompletionsAdapter({
+      model: "nvidia/nemotron-3.5-lightning-30b-a3b",
+      client: { create } as never,
+    });
+
+    await adapter.generateProposal({ input: "input" });
+    const request = create.mock.calls[0]![0] as Record<string, unknown>;
+    expect(request.reasoning_effort).toBeUndefined();
+    expect(request.extra_body).toEqual({ chat_template_kwargs: { enable_thinking: false } });
+  });
 });

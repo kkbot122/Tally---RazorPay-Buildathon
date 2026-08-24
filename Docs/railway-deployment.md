@@ -35,7 +35,7 @@ Required Railway variables:
 - `AI_REASONING_EFFORT=none` for structured proposal output
 - `WEB_ORIGIN=https://<web-public-domain>`
 
-For NVIDIA’s hosted OpenAI-compatible API, set `AI_PROVIDER=nvidia`, `AI_BASE_URL=https://integrate.api.nvidia.com/v1`, `OPENAI_API_KEY=<NVIDIA API key>`, `OPENAI_MODEL=deepseek-ai/deepseek-v4-flash-0731`, and `AI_REASONING_EFFORT=none`. The application uses NVIDIA’s `/v1/chat/completions` path and validates the returned proposal against the shared contract.
+For NVIDIA’s hosted OpenAI-compatible API, set `AI_PROVIDER=nvidia`, `AI_BASE_URL=https://integrate.api.nvidia.com/v1`, `OPENAI_API_KEY=<NVIDIA API key>`, `OPENAI_MODEL=nvidia/nemotron-3.5-lightning-30b-a3b`, and `AI_REASONING_EFFORT=none`. The application uses NVIDIA’s `/v1/chat/completions` path, sends Nemotron’s documented `chat_template_kwargs.enable_thinking` option, and validates the returned proposal against the shared contract.
 
 The API listens on Railway’s `PORT` and binds to `0.0.0.0`. `/health` is liveness-only; `/health/db` is available for database diagnostics and is not the deployment healthcheck.
 
