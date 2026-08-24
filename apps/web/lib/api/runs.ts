@@ -1,4 +1,4 @@
-import type { FinalOutcome, ReasonCode } from "@tally/contracts";
+import type { AgentEvidence, FinalOutcome, ReasonCode } from "@tally/contracts";
 
 export type CreateRunInput = { asOfDate: string; bankCsv: string; ledgerCsv: string };
 export type CreatedRun = { runId: string; status: "COMPLETED" };
@@ -21,6 +21,9 @@ export type RunResult = {
   source?: string;
   rule?: string | null;
   confidence?: "HIGH" | "MEDIUM" | "LOW" | null;
+  evidence?: AgentEvidence[];
+  conflictingEvidence?: AgentEvidence[];
+  reason?: string | null;
   amountDeltaPaise?: string | null;
 };
 

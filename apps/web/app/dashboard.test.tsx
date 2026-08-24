@@ -17,10 +17,10 @@ vi.mock("../lib/api/runs", () => api);
 import Dashboard from "./dashboard";
 
 const resultSet: RunResult[] = [
-  { caseId: "BANK:B1", bankTxnIds: ["B1", "B2"], ledgerTxnIds: ["L1"], finalOutcome: "RECONCILED", reasonCode: "GROUPED_MATCH" },
-  { caseId: "BANK:B2", bankTxnIds: ["B2"], ledgerTxnIds: [], finalOutcome: "EXPLAINED_OUTSTANDING", reasonCode: "TIMING_DIFFERENCE" },
-  { caseId: "BANK:B3", bankTxnIds: ["B3"], ledgerTxnIds: ["L3"], finalOutcome: "DISCREPANCY", reasonCode: "AMOUNT_DISCREPANCY" },
-  { caseId: "LEDGER:L4", bankTxnIds: [], ledgerTxnIds: ["L4"], finalOutcome: "UNRESOLVED", reasonCode: "NO_CANDIDATE" },
+  { caseId: "BANK:B1", bankTxnIds: ["B1", "B2"], ledgerTxnIds: ["L1"], finalOutcome: "RECONCILED", reasonCode: "GROUPED_MATCH", source: "DETERMINISTIC", rule: "R4_ONE_TO_MANY" },
+  { caseId: "BANK:B2", bankTxnIds: ["B2"], ledgerTxnIds: [], finalOutcome: "EXPLAINED_OUTSTANDING", reasonCode: "TIMING_DIFFERENCE", source: "AGENT_VERIFIED", confidence: "HIGH", reason: "The maturity date explains the outstanding balance.", evidence: [{ statement: "The ledger record matures after the as-of date.", source: "LEDGER_RECORD", recordIds: ["L2"] }], conflictingEvidence: [] },
+  { caseId: "BANK:B3", bankTxnIds: ["B3"], ledgerTxnIds: ["L3"], finalOutcome: "DISCREPANCY", reasonCode: "AMOUNT_DISCREPANCY", source: "AGENT_VERIFIED", confidence: "HIGH", amountDeltaPaise: "5000", reason: "The records differ in amount.", evidence: [{ statement: "The references identify the same business event.", source: "CROSS_RECORD", recordIds: ["B3", "L3"] }], conflictingEvidence: [{ statement: "The ledger amount does not agree with the bank amount.", source: "CROSS_RECORD", recordIds: ["B3", "L3"] }] },
+  { caseId: "LEDGER:L4", bankTxnIds: [], ledgerTxnIds: ["L4"], finalOutcome: "UNRESOLVED", reasonCode: "NO_CANDIDATE", source: "DETERMINISTIC" },
 ];
 
 function completedSummary() {
@@ -111,5 +111,129 @@ describe("T030 dashboard workflows", () => {
     expect(screen.getByText("1 of 4 persisted results")).toBeTruthy();
     expect(screen.getByText("Processed")).toBeTruthy();
     expect(api.createRun).toHaveBeenCalledTimes(postCalls);
+  });
+
+  it("opens deterministic details without inventing agent sections or fetching again", async () => {
+    render(<Dashboard />);
+    fillForm();
+    fireEvent.submit(screen.getByRole("button", { name: "Run reconciliation" }).closest("form")!);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Inspect result BANK:B1" })).toBeTruthy());
+    const callsBeforeOpen = { create: api.createRun.mock.calls.length, summary: api.getRun.mock.calls.length, results: api.getRunResults.mock.calls.length };
+
+    fireEvent.click(screen.getByRole("button", { name: "Inspect result BANK:B1" }));
+    expect(screen.getByRole("dialog", { name: "BANK:B1" })).toBeTruthy();
+    expect(screen.getAllByText("Reconciled").length).toBeGreaterThan(0);
+    expect(screen.getByText("R4_ONE_TO_MANY")).toBeTruthy();
+    expect(screen.getAllByText("B1").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("B2").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("L1").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Agent confidence")).toBeNull();
+    expect(screen.queryByText("Supporting evidence")).toBeNull();
+    expect(api.createRun).toHaveBeenCalledTimes(callsBeforeOpen.create);
+    expect(api.getRun).toHaveBeenCalledTimes(callsBeforeOpen.summary);
+    expect(api.getRunResults).toHaveBeenCalledTimes(callsBeforeOpen.results);
+
+    fireEvent.click(screen.getByRole("button", { name: "Close result details" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Inspect result BANK:B1" }));
+    expect(screen.getByText("4 of 4 persisted results")).toBeTruthy();
+  });
+
+  it("keeps keyboard focus inside the open inspector", async () => {
+    render(<Dashboard />);
+    fillForm();
+    fireEvent.submit(screen.getByRole("button", { name: "Run reconciliation" }).closest("form")!);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Inspect result BANK:B1" })).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Inspect result BANK:B1" }));
+
+    const closeButton = screen.getByRole("button", { name: "Close result details" });
+    expect(document.activeElement).toBe(closeButton);
+    fireEvent.keyDown(document, { key: "Tab" });
+    expect(document.activeElement).toBe(closeButton);
+    fireEvent.keyDown(document, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(closeButton);
+  });
+
+  it("renders every ID in an inverse grouped relationship", async () => {
+    api.getRunResults.mockResolvedValue([
+      ...resultSet,
+      { caseId: "BANK:B4", bankTxnIds: ["B4"], ledgerTxnIds: ["L5", "L6", "L7"], finalOutcome: "RECONCILED", reasonCode: "GROUPED_MATCH", source: "DETERMINISTIC", rule: "R5_MANY_TO_ONE" },
+    ]);
+    render(<Dashboard />);
+    fillForm();
+    fireEvent.submit(screen.getByRole("button", { name: "Run reconciliation" }).closest("form")!);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Inspect result BANK:B4" })).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Inspect result BANK:B4" }));
+
+    expect(screen.getByRole("dialog", { name: "BANK:B4" })).toBeTruthy();
+    expect(screen.getAllByText("B4").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("L5").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("L6").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("L7").length).toBeGreaterThan(0);
+  });
+
+  it("renders agent evidence, conflicts, qualitative confidence, and signed-safe amount details", async () => {
+    render(<Dashboard />);
+    fillForm();
+    fireEvent.submit(screen.getByRole("button", { name: "Run reconciliation" }).closest("form")!);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Inspect result BANK:B3" })).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Inspect result BANK:B3" }));
+
+    expect(screen.getByRole("dialog", { name: "BANK:B3" })).toBeTruthy();
+    expect(screen.getByText("Agent verified")).toBeTruthy();
+    expect(screen.getByText("HIGH")).toBeTruthy();
+    expect(screen.getByText("Supporting evidence")).toBeTruthy();
+    expect(screen.getByText("The references identify the same business event.")).toBeTruthy();
+    expect(screen.getByText("Conflicting evidence")).toBeTruthy();
+    expect(screen.getByText("The ledger amount does not agree with the bank amount.")).toBeTruthy();
+    expect(screen.getByText("5,000 paise")).toBeTruthy();
+    expect(screen.queryByText("95%")).toBeNull();
+  });
+
+  it("supports one-sided results, Escape close, and filter preservation", async () => {
+    render(<Dashboard />);
+    fillForm();
+    fireEvent.submit(screen.getByRole("button", { name: "Run reconciliation" }).closest("form")!);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Inspect result BANK:B2" })).toBeTruthy());
+    fireEvent.change(screen.getByLabelText("Filter"), { target: { value: "EXPLAINED_OUTSTANDING" } });
+    const trigger = screen.getByRole("button", { name: "Inspect result BANK:B2" });
+    fireEvent.click(trigger);
+    expect(screen.getByText("No matched ledger record")).toBeTruthy();
+    expect(screen.getByText("The maturity date explains the outstanding balance.")).toBeTruthy();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect((screen.getByLabelText("Filter") as HTMLSelectElement).value).toBe("EXPLAINED_OUTSTANDING");
+  });
+
+  it("renders no-candidate results without inventing a possible match", async () => {
+    render(<Dashboard />);
+    fillForm();
+    fireEvent.submit(screen.getByRole("button", { name: "Run reconciliation" }).closest("form")!);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Inspect result LEDGER:L4" })).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Inspect result LEDGER:L4" }));
+
+    expect(screen.getByRole("dialog", { name: "LEDGER:L4" })).toBeTruthy();
+    expect(screen.getAllByText("Unresolved").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("NO_CANDIDATE").length).toBeGreaterThan(0);
+    expect(screen.getByText("No matched bank record")).toBeTruthy();
+    expect(screen.queryByText(/possible match/i)).toBeNull();
+  });
+
+  it("keeps verification-failed details limited to the persisted safe outcome", async () => {
+    api.getRunResults.mockResolvedValue([
+      ...resultSet,
+      { caseId: "BANK:B5", bankTxnIds: ["B5"], ledgerTxnIds: [], finalOutcome: "UNRESOLVED", reasonCode: "VERIFICATION_FAILED", source: "AGENT_VERIFIED", confidence: "LOW", reason: "The proposal did not pass verification.", evidence: [], conflictingEvidence: [] },
+    ]);
+    render(<Dashboard />);
+    fillForm();
+    fireEvent.submit(screen.getByRole("button", { name: "Run reconciliation" }).closest("form")!);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Inspect result BANK:B5" })).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Inspect result BANK:B5" }));
+
+    expect(screen.getAllByText("Unresolved").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("VERIFICATION_FAILED").length).toBeGreaterThan(0);
+    expect(screen.getByText("The proposal did not pass verification.")).toBeTruthy();
+    expect(screen.queryByText("Verifier checks")).toBeNull();
   });
 });

@@ -1,11 +1,12 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import React from "react";
 import type { FinalOutcome } from "@tally/contracts";
 
 import { createRun, getRun, getRunResults, type RunResult, type RunSummary } from "../lib/api/runs";
 import { createSubmissionLock, filterResults, isRunFormComplete, summarizeResults } from "../lib/dashboard-model";
+import ResultDetailSheet from "./result-detail-sheet";
 
 type OutcomeFilter = "ALL" | FinalOutcome;
 
@@ -86,11 +87,23 @@ export default function Dashboard() {
   const [readError, setReadError] = useState<string | null>(null);
   const [isLoadingResults, setIsLoadingResults] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [selectedResult, setSelectedResult] = useState<RunResult | null>(null);
   const submissionLock = useRef(createSubmissionLock());
+  const selectedTriggerRef = useRef<HTMLButtonElement | null>(null);
 
   const filteredResults = useMemo(() => filterResults(results, filter), [filter, results]);
   const { total, reconciled, explainedOutstanding: explained, discrepancies: discrepancy, unresolved } = summarizeResults(results);
   const resolved = total - unresolved;
+
+  function openResult(result: RunResult, trigger: HTMLButtonElement) {
+    selectedTriggerRef.current = trigger;
+    setSelectedResult(result);
+  }
+
+  const closeResult = useCallback(() => {
+    setSelectedResult(null);
+    window.setTimeout(() => selectedTriggerRef.current?.focus(), 0);
+  }, []);
 
   function selectCsvFile(file: File | undefined, role: "bank" | "ledger") {
     if (file === undefined) return;
@@ -198,11 +211,12 @@ export default function Dashboard() {
 
             <section className={`${surface} overflow-hidden`} aria-labelledby="results-heading">
               <div className="flex flex-col items-start justify-between gap-4 border-b border-tally-border px-5 py-[18px] sm:flex-row sm:items-center"><div><h2 id="results-heading" className={sectionTitle}>Reconciliation results</h2><p className={sectionDescription}>{filteredResults.length} of {total} persisted results</p></div><div className="flex w-full items-center justify-between gap-2 sm:w-auto"><label className="text-xs text-tally-ink-muted" htmlFor="outcome-filter">Filter</label><select id="outcome-filter" className="h-[34px] flex-1 rounded border border-tally-border bg-tally-surface px-2 py-[5px] text-tally-ink sm:flex-none" value={filter} onChange={(event) => setFilter(event.target.value as OutcomeFilter)}>{outcomes.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></div></div>
-              {filteredResults.length === 0 ? <div className="px-5 py-9 text-center text-tally-ink-muted">No results match this outcome filter.</div> : <div className="overflow-x-auto"><table className="w-full min-w-[700px] border-collapse"><thead><tr><th className="bg-tally-surface-subtle px-4 py-2.5 text-left text-[11px] font-semibold uppercase leading-4 tracking-[.04em] text-tally-ink-muted" scope="col">Case</th><th className="bg-tally-surface-subtle px-4 py-2.5 text-left text-[11px] font-semibold uppercase leading-4 tracking-[.04em] text-tally-ink-muted" scope="col">Outcome</th><th className="bg-tally-surface-subtle px-4 py-2.5 text-left text-[11px] font-semibold uppercase leading-4 tracking-[.04em] text-tally-ink-muted" scope="col">Bank records</th><th className="bg-tally-surface-subtle px-4 py-2.5 text-left text-[11px] font-semibold uppercase leading-4 tracking-[.04em] text-tally-ink-muted" scope="col">Ledger records</th><th className="bg-tally-surface-subtle px-4 py-2.5 text-left text-[11px] font-semibold uppercase leading-4 tracking-[.04em] text-tally-ink-muted" scope="col">Reason</th><th className="bg-tally-surface-subtle px-4 py-2.5 text-left text-[11px] font-semibold uppercase leading-4 tracking-[.04em] text-tally-ink-muted" scope="col">Source</th></tr></thead><tbody>{filteredResults.map((result) => <tr className="hover:bg-tally-accent-soft" key={result.resultId ?? result.caseId}><td className="min-h-11 border-t border-tally-border-subtle px-4 py-3 align-middle"><span className="font-tally-mono text-xs">{result.caseId}</span></td><td className="min-h-11 border-t border-tally-border-subtle px-4 py-3 align-middle"><StatusBadge className={outcomeStyles[result.finalOutcome]}>{outcomeLabel(result.finalOutcome)}</StatusBadge></td><td className="min-h-11 border-t border-tally-border-subtle px-4 py-3 align-middle"><div className="grid gap-[3px]">{result.bankTxnIds.length === 0 ? <span className="text-tally-ink-muted">—</span> : result.bankTxnIds.map((id) => <span className="font-tally-mono text-xs text-tally-ink-secondary" key={id}>{id}</span>)}</div></td><td className="min-h-11 border-t border-tally-border-subtle px-4 py-3 align-middle"><div className="grid gap-[3px]">{result.ledgerTxnIds.length === 0 ? <span className="text-tally-ink-muted">—</span> : result.ledgerTxnIds.map((id) => <span className="font-tally-mono text-xs text-tally-ink-secondary" key={id}>{id}</span>)}</div></td><td className="min-h-11 border-t border-tally-border-subtle px-4 py-3 align-middle"><span className="text-[13px] text-tally-ink-secondary">{result.reasonCode}</span></td><td className="min-h-11 border-t border-tally-border-subtle px-4 py-3 align-middle"><span className="text-xs text-tally-ink-muted">{result.source ?? "—"}</span></td></tr>)}</tbody></table></div>}
+              {filteredResults.length === 0 ? <div className="px-5 py-9 text-center text-tally-ink-muted">No results match this outcome filter.</div> : <div className="overflow-x-auto"><table className="w-full min-w-[700px] border-collapse"><thead><tr><th className="bg-tally-surface-subtle px-4 py-2.5 text-left text-[11px] font-semibold uppercase leading-4 tracking-[.04em] text-tally-ink-muted" scope="col">Case</th><th className="bg-tally-surface-subtle px-4 py-2.5 text-left text-[11px] font-semibold uppercase leading-4 tracking-[.04em] text-tally-ink-muted" scope="col">Outcome</th><th className="bg-tally-surface-subtle px-4 py-2.5 text-left text-[11px] font-semibold uppercase leading-4 tracking-[.04em] text-tally-ink-muted" scope="col">Bank records</th><th className="bg-tally-surface-subtle px-4 py-2.5 text-left text-[11px] font-semibold uppercase leading-4 tracking-[.04em] text-tally-ink-muted" scope="col">Ledger records</th><th className="bg-tally-surface-subtle px-4 py-2.5 text-left text-[11px] font-semibold uppercase leading-4 tracking-[.04em] text-tally-ink-muted" scope="col">Reason</th><th className="bg-tally-surface-subtle px-4 py-2.5 text-left text-[11px] font-semibold uppercase leading-4 tracking-[.04em] text-tally-ink-muted" scope="col">Source</th></tr></thead><tbody>{filteredResults.map((result) => <tr className="hover:bg-tally-accent-soft" key={result.resultId ?? result.caseId}><td className="min-h-11 border-t border-tally-border-subtle px-4 py-3 align-middle"><button className="block max-w-full break-words text-left font-tally-mono text-xs text-tally-ink underline-offset-2 hover:underline" type="button" aria-label={`Inspect result ${result.caseId}`} onClick={(event) => openResult(result, event.currentTarget)}>{result.caseId}</button></td><td className="min-h-11 border-t border-tally-border-subtle px-4 py-3 align-middle"><StatusBadge className={outcomeStyles[result.finalOutcome]}>{outcomeLabel(result.finalOutcome)}</StatusBadge></td><td className="min-h-11 border-t border-tally-border-subtle px-4 py-3 align-middle"><div className="grid gap-[3px]">{result.bankTxnIds.length === 0 ? <span className="text-tally-ink-muted">—</span> : result.bankTxnIds.map((id) => <span className="font-tally-mono text-xs text-tally-ink-secondary" key={id}>{id}</span>)}</div></td><td className="min-h-11 border-t border-tally-border-subtle px-4 py-3 align-middle"><div className="grid gap-[3px]">{result.ledgerTxnIds.length === 0 ? <span className="text-tally-ink-muted">—</span> : result.ledgerTxnIds.map((id) => <span className="font-tally-mono text-xs text-tally-ink-secondary" key={id}>{id}</span>)}</div></td><td className="min-h-11 border-t border-tally-border-subtle px-4 py-3 align-middle"><span className="text-[13px] text-tally-ink-secondary">{result.reasonCode}</span></td><td className="min-h-11 border-t border-tally-border-subtle px-4 py-3 align-middle"><span className="text-xs text-tally-ink-muted">{result.source ?? "—"}</span></td></tr>)}</tbody></table></div>}
             </section>
           </>
         )}
       </main>
+      {selectedResult !== null && <ResultDetailSheet result={selectedResult} onClose={closeResult} />}
     </div>
   );
 }
