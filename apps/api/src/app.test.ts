@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { buildApp, type DatabaseHandle } from "./app.js";
+import { BenchmarkEvaluationError, type BenchmarkEvaluationResponse } from "./benchmark-evaluation-service.js";
 import type { ReconciliationRunService } from "./run-service.js";
 import { createReconciliationRunService } from "./run-service.js";
 import type { ReconciliationRunRepository } from "./db/reconciliation-run-repository.js";
@@ -44,6 +45,30 @@ function createTestService(overrides: Partial<ReconciliationRunService> = {}): R
   };
 }
 
+function evaluationResponse(runId: string): BenchmarkEvaluationResponse {
+  return {
+    runId,
+    metrics: {
+      totalCases: 1,
+      reconciledCount: 1,
+      matchRate: 1,
+      resolvedCount: 1,
+      resolutionRate: 1,
+      correctReconciliationCount: 1,
+      matchPrecision: 1,
+      falseReconciliationCount: 0,
+      falseReconciliationRate: 0,
+      exceptionCount: 0,
+      correctExceptionCount: 0,
+      exceptionAccuracy: 0,
+      unresolvedCount: 0,
+      abstentionRate: 0,
+    },
+    caseTypeBreakdown: { byExpectedOutcome: {}, byReasonCode: {} },
+    cases: [],
+  };
+}
+
 describe("GET /health", () => {
   it("returns an OK status", async () => {
     const app = buildApp(config, createTestDatabase());
@@ -79,6 +104,70 @@ describe("GET /health/db", () => {
 });
 
 describe("reconciliation routes", () => {
+  it("evaluates a persisted run through the injected T028 service", async () => {
+    const evaluate = vi.fn(async (runId: string) => evaluationResponse(runId));
+    const app = buildApp(config, createTestDatabase(), createTestService(), { evaluate });
+
+    const response = await app.inject({ method: "POST", url: "/api/runs/run-eval-001/evaluate" });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual(evaluationResponse("run-eval-001"));
+    expect(evaluate).toHaveBeenCalledOnce();
+    expect(evaluate).toHaveBeenCalledWith("run-eval-001");
+    await app.close();
+  });
+
+  it("rejects client-supplied truth and maps evaluation errors safely", async () => {
+    const evaluate = vi.fn(async () => { throw new BenchmarkEvaluationError("RUN_NOT_BENCHMARK_COMPATIBLE", "internal alignment detail"); });
+    const app = buildApp(config, createTestDatabase(), createTestService(), { evaluate });
+
+    const truthResponse = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-eval-001/evaluate",
+      payload: { groundTruthCsv: "case_id,expected_outcome" },
+    });
+    expect(truthResponse.statusCode).toBe(400);
+    expect(evaluate).not.toHaveBeenCalled();
+
+    const truthQueryResponse = await app.inject({ method: "POST", url: "/api/runs/run-eval-001/evaluate?expectedOutcome=RECONCILED" });
+    expect(truthQueryResponse.statusCode).toBe(400);
+    expect(evaluate).not.toHaveBeenCalled();
+
+    const truthHeaderResponse = await app.inject({ method: "POST", url: "/api/runs/run-eval-001/evaluate", headers: { "truth-bank-ids": "B1" } });
+    expect(truthHeaderResponse.statusCode).toBe(400);
+    expect(evaluate).not.toHaveBeenCalled();
+
+    const response = await app.inject({ method: "POST", url: "/api/runs/run-eval-001/evaluate" });
+    expect(response.statusCode).toBe(422);
+    expect(response.json()).toEqual({ error: "RUN_NOT_BENCHMARK_COMPATIBLE" });
+    expect(response.body).not.toContain("internal alignment detail");
+    await app.close();
+  });
+
+  it.each([
+    ["RUN_NOT_FOUND", 404],
+    ["RUN_NOT_COMPLETED", 422],
+  ] as const)("maps %s to %i", async (code, statusCode) => {
+    const app = buildApp(config, createTestDatabase(), createTestService(), {
+      evaluate: async () => { throw new BenchmarkEvaluationError(code, "internal detail"); },
+    });
+    const response = await app.inject({ method: "POST", url: "/api/runs/run-eval-001/evaluate" });
+    expect(response.statusCode).toBe(statusCode);
+    expect(response.body).not.toContain("internal detail");
+    await app.close();
+  });
+
+  it("returns a sanitized 500 for unexpected evaluation failures", async () => {
+    const app = buildApp(config, createTestDatabase(), createTestService(), {
+      evaluate: async () => { throw new Error("database secret"); },
+    });
+    const response = await app.inject({ method: "POST", url: "/api/runs/run-eval-001/evaluate" });
+    expect(response.statusCode).toBe(500);
+    expect(response.json()).toEqual({ error: "EVALUATION_FAILED" });
+    expect(response.body).not.toContain("database secret");
+    await app.close();
+  });
+
   it("accepts the frozen 20-case fixture through the injected T024/T025 composition", async () => {
     const fixture = buildDevFixture();
     const saved = vi.fn<(input: PersistCompletedRunInput) => Promise<void>>(async () => {});

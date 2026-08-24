@@ -92,9 +92,17 @@ export function writeBenchmarkFixture(outputDirectory = resolve(process.cwd(), "
   writeFileSync(resolve(outputDirectory, "bank_transactions.csv"), fixture.bankCsv);
   writeFileSync(resolve(outputDirectory, "ledger_transactions.csv"), fixture.ledgerCsv);
   writeFileSync(resolve(outputDirectory, "ground_truth.csv"), fixture.groundTruthCsv);
+  writeFileSync(resolve(outputDirectory, "primary_case_alignment.json"), serializePrimaryCaseAlignment(fixture.cases));
   console.log(`Generated ${fixture.cases.length}-case benchmark in ${outputDirectory}`);
   const counts = (values: readonly string[]) => Object.fromEntries([...new Set(values)].sort().map((value) => [value, values.filter((item) => item === value).length]));
   console.log(JSON.stringify({ categories: counts(fixture.cases.map((benchmarkCase) => benchmarkCase.category)), reasons: counts(fixture.cases.map((benchmarkCase) => benchmarkCase.reasonCode)) }, null, 2));
+}
+
+export function serializePrimaryCaseAlignment(cases: readonly BenchmarkCase[]): string {
+  return `${JSON.stringify(cases.flatMap((benchmarkCase) => [
+    ...benchmarkCase.bankTransactions.map((record) => ({ side: "BANK", recordId: record.bankTxnId, caseId: benchmarkCase.caseId })),
+    ...benchmarkCase.ledgerTransactions.map((record) => ({ side: "LEDGER", recordId: record.ledgerTxnId, caseId: benchmarkCase.caseId })),
+  ]), null, 2)}\n`;
 }
 
 export { parseBankCsv, parseLedgerCsv };

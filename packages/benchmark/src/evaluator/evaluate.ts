@@ -9,6 +9,13 @@ import type {
   RuntimePrimaryAlignment,
 } from "./types.js";
 
+export class BenchmarkCompatibilityError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "BenchmarkCompatibilityError";
+  }
+}
+
 export function evaluateBenchmarkRun(input: EvaluateBenchmarkInput): BenchmarkEvaluationReport {
   const truth = validateGroundTruth(input.groundTruth);
   const recordToCase = buildRecordAlignment(truth);
@@ -17,13 +24,13 @@ export function evaluateBenchmarkRun(input: EvaluateBenchmarkInput): BenchmarkEv
 
   for (const result of input.results) {
     const caseId = alignResult(result.caseId, result.bankRecordIds, result.ledgerRecordIds, recordToCase, primaryToCase);
-    if (aligned.has(caseId)) throw new Error(`Duplicate runtime result for ground-truth case ${caseId}; provide one finalized case result`);
+    if (aligned.has(caseId)) throw new BenchmarkCompatibilityError(`Duplicate runtime result for ground-truth case ${caseId}; provide one finalized case result`);
     aligned.set(caseId, result);
   }
 
   if (aligned.size !== truth.length) {
     const missing = truth.filter((row) => !aligned.has(row.caseId)).map((row) => row.caseId);
-    throw new Error(`Benchmark result alignment is incomplete; missing cases: ${missing.join(", ")}`);
+    throw new BenchmarkCompatibilityError(`Benchmark result alignment is incomplete; missing cases: ${missing.join(", ")}`);
   }
 
   const cases = truth
@@ -99,7 +106,7 @@ function alignResult(
   if (primary !== null) {
     const primaryKey = `${primary[1]}:${primary[2]}`;
     const primaryCase = primaryToCase.get(primaryKey) ?? recordToCase.get(primary[2]!);
-    if (primaryCase === undefined) throw new Error(`Runtime result has unknown primary record: ${caseId}`);
+    if (primaryCase === undefined) throw new BenchmarkCompatibilityError(`Runtime result has unknown primary record: ${caseId}`);
     // The runtime primary is the authoritative work-item identity. A wrong
     // counterpart must remain scoreable as a false reconciliation rather than
     // becoming an alignment error.
@@ -109,7 +116,7 @@ function alignResult(
     const truthCase = recordToCase.get(recordId);
     if (truthCase !== undefined) candidates.add(truthCase);
   }
-  if (candidates.size !== 1) throw new Error(`Runtime result ${caseId} cannot be aligned uniquely to ground truth`);
+  if (candidates.size !== 1) throw new BenchmarkCompatibilityError(`Runtime result ${caseId} cannot be aligned uniquely to ground truth`);
   return [...candidates][0]!;
 }
 

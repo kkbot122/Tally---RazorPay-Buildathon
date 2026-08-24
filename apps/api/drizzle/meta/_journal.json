@@ -29,6 +29,13 @@
       "when": 1787559509315,
       "tag": "0003_curious_scourge",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1787566519000,
+      "tag": "0004_finalization_order",
+      "breakpoints": true
     }
   ]
 }

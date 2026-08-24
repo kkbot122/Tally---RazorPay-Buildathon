@@ -11,6 +11,7 @@
     "db:migrate": "drizzle-kit migrate"
   },
   "dependencies": {
+    "@tally/benchmark": "workspace:*",
     "@tally/contracts": "workspace:*",
     "@tally/reconciliation": "workspace:*",
     "drizzle-orm": "^0.38.3",
@@ -19,7 +20,6 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
-    "@tally/benchmark": "workspace:*",
     "@types/node": "^22.10.7",
     "drizzle-kit": "^0.30.1",
     "tsx": "^4.19.2",

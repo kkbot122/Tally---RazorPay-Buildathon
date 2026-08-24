@@ -12,7 +12,7 @@ import {
 } from "@tally/reconciliation";
 import { describe, expect, it } from "vitest";
 
-import { buildBenchmarkFixture } from "./index.js";
+import { buildBenchmarkFixture, serializePrimaryCaseAlignment } from "./index.js";
 import { BENCHMARK_AS_OF_DATE } from "../generator/index.js";
 import { validateBenchmarkFixture } from "./validate-benchmark.js";
 
@@ -25,6 +25,7 @@ describe("frozen 100-case benchmark", () => {
     expect(fixture.bankCsv).toBe(readFileSync(resolve(artifactDirectory, "bank_transactions.csv"), "utf8"));
     expect(fixture.ledgerCsv).toBe(readFileSync(resolve(artifactDirectory, "ledger_transactions.csv"), "utf8"));
     expect(fixture.groundTruthCsv).toBe(readFileSync(resolve(artifactDirectory, "ground_truth.csv"), "utf8"));
+    expect(serializePrimaryCaseAlignment(fixture.cases)).toBe(readFileSync(resolve(artifactDirectory, "primary_case_alignment.json"), "utf8"));
   });
 
   it("has truth-free runtime inputs, intact truth relationships, and exact group coverage", () => {

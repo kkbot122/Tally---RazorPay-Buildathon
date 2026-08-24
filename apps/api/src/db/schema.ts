@@ -166,6 +166,7 @@ export const reconciliationResults = pgTable(
     conflictingEvidence: jsonb("conflicting_evidence").$type<Record<string, unknown>[]>().notNull().default([]),
     reason: text("reason"),
     amountDeltaPaise: text("amount_delta_paise"),
+    finalizationOrder: integer("finalization_order"),
     agentProposalId: text("agent_proposal_id").references(() => agentProposals.proposalId, {
       onDelete: "set null",
     }),

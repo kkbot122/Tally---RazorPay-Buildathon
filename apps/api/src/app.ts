@@ -1,3 +1,4 @@
+import { loadFrozenGroundTruth, loadFrozenPrimaryCaseAlignment } from "@tally/benchmark";
 import Fastify from "fastify";
 import { CsvValidationError, OpenAIResponsesAdapter } from "@tally/reconciliation";
 import { ZodError } from "zod";
@@ -5,7 +6,22 @@ import type { AppConfig } from "./config/env.js";
 import { loadConfig } from "./config/env.js";
 import { createDatabase } from "./db/client.js";
 import { createReconciliationRunRepository } from "./db/reconciliation-run-repository.js";
+import { BenchmarkEvaluationError, createBenchmarkEvaluationService, type BenchmarkEvaluationResponse } from "./benchmark-evaluation-service.js";
 import { CreateRunRequestSchema, createReconciliationRunService, type ReconciliationRunService } from "./run-service.js";
+
+const EVALUATION_TRUTH_FIELDS = new Set([
+  "groundtruthcsv",
+  "groundtruth",
+  "expectedoutcome",
+  "expectedreasoncode",
+  "benchmarkcategory",
+  "truthbankids",
+  "truthledgerids",
+]);
+
+function normalizedEvaluationField(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
 
 export interface DatabaseHandle {
   db?: Parameters<typeof createReconciliationRunRepository>[0];
@@ -13,16 +29,26 @@ export interface DatabaseHandle {
   close(): Promise<void>;
 }
 
+export interface BenchmarkEvaluationService {
+  evaluate(runId: string): Promise<BenchmarkEvaluationResponse>;
+}
+
 export function buildApp(
   config: AppConfig = loadConfig(),
   database: DatabaseHandle = createDatabase(config.DATABASE_URL),
   service?: ReconciliationRunService,
+  evaluationService?: BenchmarkEvaluationService,
 ) {
   const app = Fastify({ logger: true });
   const runService = service ?? (database.db === undefined ? undefined : createReconciliationRunService(
     createReconciliationRunRepository(database.db),
     new OpenAIResponsesAdapter({ apiKey: config.OPENAI_API_KEY, model: config.OPENAI_MODEL }),
   ));
+  const benchmarkEvaluationService = evaluationService ?? (database.db === undefined ? undefined : createBenchmarkEvaluationService(
+      createReconciliationRunRepository(database.db),
+      loadFrozenGroundTruth,
+      loadFrozenPrimaryCaseAlignment,
+    ));
 
   app.get("/health", async () => ({ status: "ok" as const }));
 
@@ -33,6 +59,44 @@ export function buildApp(
     } catch (error) {
       request.log.error(error, "database health check failed");
       return reply.code(503).send({ db: "error" as const });
+    }
+  });
+
+  app.post("/api/runs/:runId/evaluate", {
+    schema: {
+      params: {
+        type: "object",
+        required: ["runId"],
+        properties: { runId: { type: "string", minLength: 1 } },
+        additionalProperties: false,
+      },
+    },
+  }, async (request, reply) => {
+    const body = request.body as unknown;
+    if (body !== undefined && body !== null && (
+      typeof body !== "object" ||
+      Array.isArray(body) ||
+      Object.keys(body as Record<string, unknown>).length > 0
+    )) {
+      return reply.code(400).send({ error: "invalid evaluation request" });
+    }
+    const query = request.query as Record<string, unknown>;
+    const hasTruthQuery = Object.keys(query).some((key) => EVALUATION_TRUTH_FIELDS.has(normalizedEvaluationField(key)));
+    const hasTruthHeader = Object.keys(request.headers).some((key) => EVALUATION_TRUTH_FIELDS.has(normalizedEvaluationField(key)));
+    if (hasTruthQuery || hasTruthHeader) return reply.code(400).send({ error: "invalid evaluation request" });
+    if (benchmarkEvaluationService === undefined) return reply.code(503).send({ error: "evaluation service unavailable" });
+    const { runId } = request.params as { runId: string };
+    try {
+      return await benchmarkEvaluationService.evaluate(runId);
+    } catch (error) {
+      if (error instanceof BenchmarkEvaluationError) {
+        if (error.code === "RUN_NOT_FOUND") return reply.code(404).send({ error: error.code, message: "run not found" });
+        if (error.code === "RUN_NOT_COMPLETED" || error.code === "RUN_NOT_BENCHMARK_COMPATIBLE") {
+          return reply.code(422).send({ error: error.code });
+        }
+      }
+      request.log.error(error, "benchmark evaluation failed");
+      return reply.code(500).send({ error: "EVALUATION_FAILED" });
     }
   });
 

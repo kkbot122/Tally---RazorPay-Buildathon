@@ -23,6 +23,7 @@ export type PersistedFinalResult = {
   conflictingEvidence?: AgentEvidence[];
   reason?: string;
   amountDeltaPaise?: string;
+  finalizationOrder?: number;
 };
 
 export type PersistedTraceEvent = {
@@ -140,6 +141,9 @@ export function validatePersistCompletedRunInput(input: PersistCompletedRunInput
   input.results.forEach((result) => {
     if (caseIds.has(result.caseId)) throw new Error(`duplicate final result case ID: ${result.caseId}`);
     caseIds.add(result.caseId);
+    if (result.finalizationOrder !== undefined && (!Number.isInteger(result.finalizationOrder) || result.finalizationOrder < 1)) {
+      throw new Error(`invalid finalization order for ${result.caseId}`);
+    }
   });
   if (Number.isNaN(new Date(input.asOfDate).getTime())) throw new Error("asOfDate must be a valid date");
   input.trace.forEach((event) => {
@@ -173,6 +177,7 @@ function mapResultRow(
     conflictingEvidence: result.conflictingEvidence ?? [],
     reason: result.reason ?? null,
     amountDeltaPaise: result.amountDeltaPaise ?? null,
+    finalizationOrder: result.finalizationOrder ?? null,
     agentProposalId: proposalEvents.has(result.caseId) ? proposalId(runId, result.caseId) : null,
     verificationId: verificationEvents.has(result.caseId) ? verificationId(runId, result.caseId) : null,
   };

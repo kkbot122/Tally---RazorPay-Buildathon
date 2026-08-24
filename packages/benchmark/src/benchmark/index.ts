@@ -3,6 +3,7 @@ export {
   BENCHMARK_COMPOSITION,
   BENCHMARK_SEED,
   buildBenchmarkFixture,
+  serializePrimaryCaseAlignment,
   writeBenchmarkFixture,
 } from "./generate-benchmark.js";
 export { validateBenchmarkFixture } from "./validate-benchmark.js";

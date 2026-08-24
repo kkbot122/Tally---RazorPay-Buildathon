@@ -20,12 +20,13 @@ export {
   BENCHMARK_COMPOSITION,
   BENCHMARK_SEED,
   buildBenchmarkFixture,
+  serializePrimaryCaseAlignment,
   validateBenchmarkFixture,
   writeBenchmarkFixture,
 } from "./src/benchmark/index.js";
 export type { BenchmarkFixture } from "./src/benchmark/index.js";
 
-export { evaluateBenchmarkRun, finalizeRuntimeCaseResults, GROUND_TRUTH_HEADERS, parseGroundTruthCsv } from "./src/evaluator/index.js";
+export { BenchmarkCompatibilityError, evaluateBenchmarkRun, finalizeRuntimeCaseResults, GROUND_TRUTH_HEADERS, loadFrozenGroundTruth, loadFrozenPrimaryCaseAlignment, parseGroundTruthCsv, validatePrimaryCaseAlignment } from "./src/evaluator/index.js";
 export type {
   BenchmarkCaseTypeMetrics,
   BenchmarkEvaluationMetrics,
