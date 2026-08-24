@@ -121,9 +121,11 @@ export const TraceEventTypeSchema = z.enum([
 export const TraceEventSchema = z.object({
   eventId: id,
   runId: id,
-  caseId: id.optional(),
+  caseId: id.nullable().optional(),
+  sequenceNo: z.number().int().positive().optional(),
   type: TraceEventTypeSchema,
   occurredAt: z.string().datetime({ offset: true }),
   message: nonEmptyText,
   metadata: z.record(z.unknown()),
+  payload: z.record(z.unknown()).optional(),
 });

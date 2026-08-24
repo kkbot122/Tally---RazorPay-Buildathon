@@ -124,6 +124,17 @@ export type {
   VerifyNonMatchProposalInput,
 } from "./src/verifier/index.js";
 
+export { createTraceRecorder } from "./src/trace/index.js";
+export type {
+  RecordedTraceEvent,
+  CaseScopedTraceEventType,
+  RunScopedTraceEventType,
+  TraceEventPayload,
+  TraceRecordInput,
+  TraceRecorder,
+  TraceRecorderOptions,
+} from "./src/trace/index.js";
+
 export type {
   CsvSource,
   CsvValidationIssue,
