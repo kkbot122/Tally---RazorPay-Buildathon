@@ -18,6 +18,7 @@ export {
   CsvValidationError,
   LEDGER_CSV_HEADERS,
   parseBankCsv,
+  parseCsvRows,
   parseLedgerCsv,
 } from "./src/parsing/index.js";
 

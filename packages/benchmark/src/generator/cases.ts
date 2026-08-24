@@ -131,7 +131,7 @@ const discrepancy: CaseBuilder = (context, caseId) => {
       reasonCode: "DUPLICATE_USAGE",
       bankTransactions: duplicateBank,
       ledgerTransactions: duplicateLedger,
-      truth: { ...emptyTruth(event, [duplicateBank[0]!], [duplicateLedger[0]!]), plausibleLedgerRecordIds: duplicateLedger.map((record) => record.ledgerTxnId) },
+      truth: { ...emptyTruth(event, [duplicateBank[1]!], [duplicateLedger[0]!]), plausibleLedgerRecordIds: duplicateLedger.map((record) => record.ledgerTxnId) },
       notes: "Two runtime proposals can target the same ledger record; stable consumption must reject the later use.",
     };
   }

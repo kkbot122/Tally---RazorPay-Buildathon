@@ -50,7 +50,7 @@ C077,B2598|B1859|B6755,L9898,RECONCILED,GROUPED_MATCH,
 C081,B8527,L6194,DISCREPANCY,AMOUNT_DISCREPANCY,"Related references and entities are present, but the amounts contradict without an explanatory record."
 C008,B8782,L8920,RECONCILED,EXACT_MATCH,
 C070,B9042,L6086|L8856,RECONCILED,GROUPED_MATCH,
-C090,B2001,L2699,DISCREPANCY,DUPLICATE_USAGE,Two runtime proposals can target the same ledger record; stable consumption must reject the later use.
+C090,B5600,L2699,DISCREPANCY,DUPLICATE_USAGE,Two runtime proposals can target the same ledger record; stable consumption must reject the later use.
 C022,B9060,L5127,RECONCILED,NORMALIZED_REFERENCE_MATCH,
 C038,B9900,L2925,RECONCILED,COUNTERPARTY_MATCH,
 C036,B2950,L2466,RECONCILED,COUNTERPARTY_MATCH,
@@ -69,7 +69,7 @@ C084,B3337,L5009,DISCREPANCY,AMOUNT_DISCREPANCY,"Related references and entities
 C091,B8817,,UNRESOLVED,MULTIPLE_PLAUSIBLE_CANDIDATES,Both ledger records expose identical observable evidence; no unique counterpart is truth-selected.
 C076,B7627|B3465,L1471,RECONCILED,GROUPED_MATCH,
 C018,B8777,L8872,RECONCILED,EXACT_MATCH,
-C089,B3872,L9886,DISCREPANCY,DUPLICATE_USAGE,Two runtime proposals can target the same ledger record; stable consumption must reject the later use.
+C089,B4732,L9886,DISCREPANCY,DUPLICATE_USAGE,Two runtime proposals can target the same ledger record; stable consumption must reject the later use.
 C087,B9143,L8973,DISCREPANCY,CONFLICTING_RECORDS,"The records retain compatible amount, currency, and direction evidence but conflict across their reference, counterparty, and descriptions."
 C046,B7435,L5900,RECONCILED,MULTI_EVIDENCE_MATCH,"Relationship is grounded in the canonical synthetic entity and invoice event, not one exact text field."
 C052,B2146,L4984,RECONCILED,MULTI_EVIDENCE_MATCH,"Relationship is grounded in the canonical synthetic entity and invoice event, not one exact text field."

@@ -1,4 +1,4 @@
-export type CsvSource = "BANK" | "LEDGER";
+export type CsvSource = string;
 
 export type CsvValidationIssue = {
   row?: number;

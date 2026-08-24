@@ -108,6 +108,7 @@ export async function runReconciliation(input: RunReconciliationInput): Promise<
           reasonCode: event.reasonCode,
           source: "DETERMINISTIC",
           rule: event.rule,
+          finalizationOrder: results.length + 1,
         });
         finalizedPrimaries.add(primaryKey(event.anchorSide, event.anchorId));
       },
@@ -220,7 +221,8 @@ function finalizeAgentProposal(
       });
   trace.record({ type: "VERIFICATION_CHECKED", caseId: item.caseId, payload: verificationPayload(verification) });
 
-  const result = finalizeAgentResult(item.caseId, proposal, verification);
+  const result = finalizeAgentResult(item.caseId, item.primary, proposal, verification);
+  result.finalizationOrder = results.length + 1;
   trace.record({
     type: "CASE_FINALIZED",
     caseId: item.caseId,
@@ -319,6 +321,7 @@ function verificationPayload(verification: MatchVerificationResult | NonMatchVer
 
 function finalizeAgentResult(
   caseIdValue: string,
+  primary: CandidatePrimary,
   proposal: AgentProposal,
   verification: MatchVerificationResult | NonMatchVerificationResult,
 ): FinalReconciliationResult {
@@ -337,7 +340,7 @@ function finalizeAgentResult(
         reason: proposal.reason,
       };
     }
-    return rejectedAgentResult(caseIdValue, proposal);
+    return rejectedAgentResult(caseIdValue, primary, proposal);
   }
 
   if (verification.status === "VERIFIED" && "outcome" in verification) {
@@ -355,15 +358,15 @@ function finalizeAgentResult(
       ...(verification.amountDeltaPaise === undefined ? {} : { amountDeltaPaise: verification.amountDeltaPaise }),
     };
   }
-  return rejectedAgentResult(caseIdValue, proposal);
+  return rejectedAgentResult(caseIdValue, primary, proposal);
 }
 
-function rejectedAgentResult(caseIdValue: string, proposal: AgentProposal): FinalReconciliationResult {
+function rejectedAgentResult(caseIdValue: string, primary: CandidatePrimary, proposal: AgentProposal): FinalReconciliationResult {
   return {
     caseId: caseIdValue,
     outcome: "UNRESOLVED",
-    bankRecordIds: [],
-    ledgerRecordIds: [],
+    bankRecordIds: primary.side === "BANK" ? [primary.recordId] : [],
+    ledgerRecordIds: primary.side === "LEDGER" ? [primary.recordId] : [],
     reasonCode: "VERIFICATION_FAILED",
     source: "AGENT_VERIFIED",
     confidence: proposal.confidence,

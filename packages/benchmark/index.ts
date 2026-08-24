@@ -24,3 +24,15 @@ export {
   writeBenchmarkFixture,
 } from "./src/benchmark/index.js";
 export type { BenchmarkFixture } from "./src/benchmark/index.js";
+
+export { evaluateBenchmarkRun, finalizeRuntimeCaseResults, GROUND_TRUTH_HEADERS, parseGroundTruthCsv } from "./src/evaluator/index.js";
+export type {
+  BenchmarkCaseTypeMetrics,
+  BenchmarkEvaluationMetrics,
+  BenchmarkEvaluationReport,
+  CaseEvaluation,
+  EvaluateBenchmarkInput,
+  GroundTruthRow,
+  RuntimePrimaryAlignment,
+  RuntimePrimaryResult,
+} from "./src/evaluator/index.js";

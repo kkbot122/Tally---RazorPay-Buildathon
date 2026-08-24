@@ -35,6 +35,8 @@ export type FinalReconciliationResult = {
   conflictingEvidence?: AgentEvidence[];
   reason?: string;
   amountDeltaPaise?: string;
+  /** Monotonic runtime finalization order; used by evaluator adapters only. */
+  finalizationOrder?: number;
 };
 
 export type ReconciliationRunResult = {
