@@ -99,7 +99,9 @@ export default function ResultDetailSheet({ result, onClose }: ResultDetailSheet
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [onClose]);
 
-  const isAgentVerified = result.source === "AGENT_VERIFIED";
+  const isAgentProposal = result.source === "AGENT_VERIFIED";
+  const isVerified = result.verificationStatus === "VERIFIED";
+  const isRejected = result.verificationStatus === "REJECTED";
   const evidence = result.evidence ?? [];
   const conflictingEvidence = result.conflictingEvidence ?? [];
   const hasAmountDifference = result.reasonCode === "AMOUNT_DISCREPANCY" || result.amountDeltaPaise !== null && result.amountDeltaPaise !== undefined;
@@ -118,12 +120,12 @@ export default function ResultDetailSheet({ result, onClose }: ResultDetailSheet
 
           <section className="border-t border-tally-border-subtle pt-5" aria-labelledby="relationship-heading"><h3 id="relationship-heading" className="mb-3 text-sm font-semibold">Relationship</h3><div className="grid gap-3 sm:grid-cols-2"><RecordGroup label="Bank records" ids={result.bankTxnIds} emptyLabel="No matched bank record" /><RecordGroup label="Ledger records" ids={result.ledgerTxnIds} emptyLabel="No matched ledger record" /></div></section>
 
-          <section className="border-t border-tally-border-subtle pt-5" aria-labelledby="metadata-heading"><h3 id="metadata-heading" className="mb-3 text-sm font-semibold">Decision metadata</h3><dl className="grid gap-3 sm:grid-cols-2"><div><dt className="text-xs text-tally-ink-muted">Source</dt><dd className="mt-0.5 m-0">{sourceLabels[result.source ?? ""] ?? result.source ?? "Not recorded"}</dd></div>{result.rule && <div><dt className="text-xs text-tally-ink-muted">Rule</dt><dd className="mt-0.5 m-0 font-tally-mono text-xs">{result.rule}</dd></div>}{isAgentVerified && result.confidence && <div><dt className="text-xs text-tally-ink-muted">Agent confidence</dt><dd className="mt-0.5 m-0">{result.confidence}</dd></div>}</dl></section>
+          <section className="border-t border-tally-border-subtle pt-5" aria-labelledby="metadata-heading"><h3 id="metadata-heading" className="mb-3 text-sm font-semibold">Decision metadata</h3><dl className="grid gap-3 sm:grid-cols-2"><div><dt className="text-xs text-tally-ink-muted">Source</dt><dd className="mt-0.5 m-0">{sourceLabels[result.source ?? ""] ?? result.source ?? "Not recorded"}</dd></div>{isVerified && <div><dt className="text-xs text-tally-ink-muted">Verifier decision</dt><dd className="mt-0.5 m-0">Verified by authoritative verifier</dd></div>}{isRejected && <div><dt className="text-xs text-tally-ink-muted">Verifier decision</dt><dd className="mt-0.5 m-0">Rejected by authoritative verifier</dd></div>}{result.rule && <div><dt className="text-xs text-tally-ink-muted">Rule</dt><dd className="mt-0.5 m-0 font-tally-mono text-xs">{result.rule}</dd></div>}{isAgentProposal && result.confidence && <div><dt className="text-xs text-tally-ink-muted">Agent confidence</dt><dd className="mt-0.5 m-0">{result.confidence}</dd></div>}</dl></section>
 
           {hasAmountDifference && <section className="border-t border-tally-border-subtle pt-5" aria-labelledby="amount-heading"><h3 id="amount-heading" className="mb-2 text-sm font-semibold">Amount difference</h3>{result.amountDeltaPaise ? <p className="m-0 font-tally-mono text-base tabular-nums">{formatPaise(result.amountDeltaPaise)}</p> : <p className="m-0 text-sm text-tally-ink-muted">Amount delta was not persisted for this result.</p>}</section>}
 
-          {isAgentVerified && <EvidenceList title="Supporting evidence" items={evidence} />}
-          {isAgentVerified && <EvidenceList title="Conflicting evidence" items={conflictingEvidence} conflicting />}
+          {isAgentProposal && <EvidenceList title="Supporting evidence" items={evidence} />}
+          {isAgentProposal && <EvidenceList title="Conflicting evidence" items={conflictingEvidence} conflicting />}
         </div>
       </aside>
     </div>

@@ -3,11 +3,12 @@ import Fastify from "fastify";
 import { CsvValidationError, OpenAIResponsesAdapter } from "@tally/reconciliation";
 import { ZodError } from "zod";
 import type { AppConfig } from "./config/env.js";
-import { loadConfig } from "./config/env.js";
+import { loadConfig, useE2EDeterministicAdapter } from "./config/env.js";
 import { createDatabase } from "./db/client.js";
 import { createReconciliationRunRepository } from "./db/reconciliation-run-repository.js";
 import { BenchmarkEvaluationError, createBenchmarkEvaluationService, type BenchmarkEvaluationResponse } from "./benchmark-evaluation-service.js";
 import { CreateRunRequestSchema, createReconciliationRunService, type ReconciliationRunService } from "./run-service.js";
+import { createE2EReasoningAdapter } from "./e2e-reasoning-adapter.js";
 
 const EVALUATION_TRUTH_FIELDS = new Set([
   "groundtruthcsv",
@@ -42,7 +43,9 @@ export function buildApp(
   const app = Fastify({ logger: true });
   const runService = service ?? (database.db === undefined ? undefined : createReconciliationRunService(
     createReconciliationRunRepository(database.db),
-    new OpenAIResponsesAdapter({ apiKey: config.OPENAI_API_KEY, model: config.OPENAI_MODEL }),
+    useE2EDeterministicAdapter(config)
+      ? createE2EReasoningAdapter()
+      : new OpenAIResponsesAdapter({ apiKey: config.OPENAI_API_KEY, model: config.OPENAI_MODEL }),
   ));
   const benchmarkEvaluationService = evaluationService ?? (database.db === undefined ? undefined : createBenchmarkEvaluationService(
       createReconciliationRunRepository(database.db),

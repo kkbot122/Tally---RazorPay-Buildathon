@@ -4,10 +4,13 @@
   "packageManager": "pnpm@10.15.0",
   "scripts": {
     "typecheck": "pnpm -r typecheck",
+    "test:e2e": "sh scripts/e2e.sh",
+    "test:e2e:direct": "playwright test",
     "dev:web": "pnpm --filter @tally/web dev",
     "dev:api": "pnpm --filter @tally/api dev"
   },
   "devDependencies": {
+    "@playwright/test": "1.58.2",
     "typescript": "^5.7.3"
   }
 }

@@ -7,6 +7,7 @@ export const EnvSchema = z.object({
   OPENAI_API_KEY: z.string().default(""),
   OPENAI_MODEL: z.string().trim().min(1).default("gpt-5.6-terra"),
   WEB_ORIGIN: z.string().url().default("http://localhost:3000"),
+  TALLY_E2E_DETERMINISTIC_ADAPTER: z.enum(["true", "false"]).optional(),
 });
 
 export type AppConfig = z.infer<typeof EnvSchema>;
@@ -17,4 +18,8 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
     throw new Error("OPENAI_API_KEY is required in production");
   }
   return config;
+}
+
+export function useE2EDeterministicAdapter(config: Pick<AppConfig, "NODE_ENV" | "TALLY_E2E_DETERMINISTIC_ADAPTER">): boolean {
+  return config.NODE_ENV === "test" && config.TALLY_E2E_DETERMINISTIC_ADAPTER === "true";
 }

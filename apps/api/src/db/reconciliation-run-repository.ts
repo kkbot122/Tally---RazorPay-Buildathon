@@ -106,7 +106,19 @@ export function createReconciliationRunRepository(db: DatabaseClient): Reconcili
       return rows[0];
     },
     async getResultsForRun(runId) {
-      return db.select().from(reconciliationResults).where(eq(reconciliationResults.runId, runId)).orderBy(asc(reconciliationResults.createdAt));
+      const rows = await db.select({
+        result: reconciliationResults,
+        verification: verificationResults,
+      }).from(reconciliationResults)
+        .leftJoin(verificationResults, eq(reconciliationResults.verificationId, verificationResults.verificationId))
+        .where(eq(reconciliationResults.runId, runId))
+        .orderBy(asc(reconciliationResults.createdAt));
+      return rows.map(({ result, verification }) => ({
+        ...result,
+        verificationStatus: verification === null
+          ? undefined
+          : verification.result.status === "VERIFIED" ? "VERIFIED" as const : "REJECTED" as const,
+      }));
     },
     async getTraceForRun(runId) {
       const rows = await db.select().from(traceEvents).where(eq(traceEvents.runId, runId)).orderBy(asc(traceEvents.sequenceNo));

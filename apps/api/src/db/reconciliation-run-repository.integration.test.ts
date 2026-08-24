@@ -102,6 +102,7 @@ describeDatabase("PostgreSQL reconciliation persistence", () => {
     await expect(repository.getResultsForRun(input.runId)).resolves.toMatchObject([{
       finalOutcome: "RECONCILED",
       source: "AGENT_VERIFIED",
+      verificationStatus: "VERIFIED",
       amountDeltaPaise: "-5000",
       evidence: before.results[0]!.evidence,
     }]);

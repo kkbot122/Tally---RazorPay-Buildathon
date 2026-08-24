@@ -19,6 +19,7 @@ export type RunResult = {
   finalOutcome: FinalOutcome;
   reasonCode: ReasonCode;
   source?: string;
+  verificationStatus?: "VERIFIED" | "REJECTED";
   rule?: string | null;
   confidence?: "HIGH" | "MEDIUM" | "LOW" | null;
   evidence?: AgentEvidence[];
