@@ -8,6 +8,8 @@ import type { TrueFinancialEvent } from "./types.js";
 export type GeneratorContext = {
   random: RandomSource;
   ids: ReturnType<typeof createIdFactory>;
+  amountValues?: readonly number[];
+  profile?: "DEV" | "FINAL";
 };
 
 export function chooseEntity(context: GeneratorContext): SyntheticEntity {
@@ -15,7 +17,7 @@ export function chooseEntity(context: GeneratorContext): SyntheticEntity {
 }
 
 export function createEvent(context: GeneratorContext, entity = chooseEntity(context)): TrueFinancialEvent {
-  const amountCents = context.random.pick([500_000, 995_000, 1_000_000, 1_245_000, 2_500_000]);
+  const amountCents = context.random.pick(context.amountValues ?? [500_000, 995_000, 1_000_000, 1_245_000, 2_500_000]);
   const invoiceNumber = context.random.integer(100, 999);
   const dayOffset = context.random.integer(0, 60);
   return {

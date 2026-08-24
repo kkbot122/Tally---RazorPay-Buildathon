@@ -4,8 +4,8 @@ import { createRandomSource } from "./random.js";
 import { validateBenchmarkCase } from "./validate-case.js";
 import type { BenchmarkGenerator, GenerateCaseInput } from "./types.js";
 
-export function createBenchmarkGenerator(options: { seed: number }): BenchmarkGenerator {
-  const context = { random: createRandomSource(options.seed), ids: createIdFactory(options.seed) };
+export function createBenchmarkGenerator(options: { seed: number; amountValues?: readonly number[]; profile?: "DEV" | "FINAL" }): BenchmarkGenerator {
+  const context = { random: createRandomSource(options.seed), ids: createIdFactory(options.seed), amountValues: options.amountValues, profile: options.profile ?? "DEV" };
   const generatedCaseIds = new Set<string>();
 
   return {

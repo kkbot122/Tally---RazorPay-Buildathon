@@ -37,7 +37,9 @@ export function validateBenchmarkCase(benchmarkCase: BenchmarkCase): BenchmarkCa
     case "STRONG_CONTEXT":
     case "SEMANTIC":
     case "DISCREPANCY":
-      assert(benchmarkCase.bankTransactions.length === 1 && benchmarkCase.ledgerTransactions.length === 1, "category requires one-to-one cardinality");
+      assert(benchmarkCase.reasonCode === "DUPLICATE_USAGE"
+        ? benchmarkCase.bankTransactions.length === 2 && benchmarkCase.ledgerTransactions.length === 2 && benchmarkCase.truth.bankRecordIds.length === 1 && benchmarkCase.truth.ledgerRecordIds.length === 1
+        : benchmarkCase.bankTransactions.length === 1 && benchmarkCase.ledgerTransactions.length === 1, "category requires supported cardinality");
       break;
     case "TIMING":
       assert(benchmarkCase.expectedOutcome === "EXPLAINED_OUTSTANDING", "timing outcome is incorrect");
@@ -76,6 +78,9 @@ export function validateBenchmarkCase(benchmarkCase: BenchmarkCase): BenchmarkCa
   if (benchmarkCase.category === "DISCREPANCY") {
     if (benchmarkCase.reasonCode === "AMOUNT_DISCREPANCY") {
       assert(benchmarkCase.bankTransactions[0]?.amount !== benchmarkCase.ledgerTransactions[0]?.amount, "amount discrepancy records must differ in amount");
+    } else if (benchmarkCase.reasonCode === "DUPLICATE_USAGE") {
+      assert(benchmarkCase.bankTransactions.every((record) => record.amount === benchmarkCase.ledgerTransactions[0]?.amount), "duplicate usage records must remain financially compatible");
+      assert(benchmarkCase.bankTransactions.every((record) => record.reference === null && record.counterparty === "Duplicate Usage Holdings"), "duplicate usage bank evidence must be intentionally ambiguous");
     } else {
       assert(benchmarkCase.bankTransactions[0]?.amount === benchmarkCase.ledgerTransactions[0]?.amount, "conflicting records retain the same amount");
       assert(benchmarkCase.bankTransactions[0]?.direction === benchmarkCase.ledgerTransactions[0]?.direction, "conflicting records must retain the same direction");

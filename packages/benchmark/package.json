@@ -9,7 +9,8 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "generate:dev": "tsx scripts/generate-dev.ts"
+    "generate:dev": "tsx scripts/generate-dev.ts",
+    "generate:benchmark": "tsx scripts/generate-benchmark.ts"
   },
   "dependencies": {
     "@tally/contracts": "workspace:*",

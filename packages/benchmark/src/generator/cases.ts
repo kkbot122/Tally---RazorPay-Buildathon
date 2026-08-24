@@ -36,15 +36,21 @@ const semantic: CaseBuilder = (context, caseId) => {
   const entity = chooseEntity(context);
   const event = createEvent(context, entity);
   const number = event.canonicalReference.replace("INV", "");
+  const final = context.profile === "FINAL";
+  const variant = final ? Number.parseInt(caseId.replace(/\D/g, ""), 10) % 5 : 0;
   const bank = [makeBank(context, event, {
-    reference: `INV-${number}`,
-    counterparty: entity.variants[0] ?? entity.canonicalName,
-    description: `NEFT ${entity.variants[0] ?? entity.canonicalName}, ${event.canonicalReference}`,
+    reference: final && variant === 0 ? `PAYMENT FOR ${number}` : `INV-${number}`,
+    counterparty: final
+      ? `${entity.variants[variant % entity.variants.length] ?? entity.canonicalName} Holdings`
+      : entity.variants[0] ?? entity.canonicalName,
+    description: final && variant === 1 ? `Settlement for order ${number}` : `NEFT ${entity.variants[0] ?? entity.canonicalName}, ${event.canonicalReference}`,
+    ...(final ? { batchId: null } : {}),
   })];
   const ledger = [makeLedger(context, event, {
-    reference: `Invoice ${number}`,
+    reference: final && variant === 2 ? `Receipt ${number}` : `Invoice ${number}`,
     counterparty: entity.canonicalName,
-    description: `Receipt against invoice #${number}`,
+    description: final && variant === 3 ? `Accounts receivable settlement ${number}` : `Receipt against invoice #${number}`,
+    ...(final ? { batchId: null } : {}),
   })];
   return { caseId, category: "SEMANTIC", expectedOutcome: "RECONCILED", reasonCode: "MULTI_EVIDENCE_MATCH", bankTransactions: bank, ledgerTransactions: ledger, truth: emptyTruth(event, bank, ledger), notes: "Relationship is grounded in the canonical synthetic entity and invoice event, not one exact text field." };
 };
@@ -89,17 +95,52 @@ const groupedManyToOne: CaseBuilder = (context, caseId) => grouped(context, case
 
 const discrepancy: CaseBuilder = (context, caseId) => {
   const event = createEvent(context);
-  if (Number.parseInt(caseId.replace(/\D/g, ""), 10) % 2 === 0) {
-    const bank = [makeBank(context, event, { amount: money(cents(event.amount) - 5_000) })];
+  const ordinal = Number.parseInt(caseId.replace(/\D/g, ""), 10);
+  if (context.profile !== "FINAL") {
+    if (ordinal % 2 === 0) {
+      const bank = [makeBank(context, event, { amount: money(cents(event.amount) - 5_000) })];
+      const ledger = [makeLedger(context, event)];
+      return { caseId, category: "DISCREPANCY", expectedOutcome: "DISCREPANCY", reasonCode: "AMOUNT_DISCREPANCY", bankTransactions: bank, ledgerTransactions: ledger, truth: emptyTruth(event, bank, ledger), notes: "Related references and entities are present, but the amounts contradict without an explanatory record." };
+    }
+    const entity = chooseEntity(context);
+    const conflictingEvent = createEvent(context, entity);
+    const number = conflictingEvent.canonicalReference.replace("INV", "");
+    const bank = [makeBank(context, conflictingEvent, { reference: `INV-${number}`, counterparty: entity.variants[0] ?? entity.canonicalName, description: `Payment for invoice ${number}` })];
+    const ledger = [makeLedger(context, conflictingEvent, { reference: `INV-${Number(number) + 1}`, counterparty: entity.canonicalName, description: `Receipt against invoice ${number}` })];
+    return { caseId, category: "DISCREPANCY", expectedOutcome: "DISCREPANCY", reasonCode: "CONFLICTING_RECORDS", bankTransactions: bank, ledgerTransactions: ledger, truth: emptyTruth(conflictingEvent, bank, ledger), notes: "The records retain compatible amount, currency, and direction evidence but conflict across their reference, counterparty, and descriptions." };
+  }
+  if (ordinal % 10 >= 1 && ordinal % 10 <= 5) {
+    const delta = ordinal % 2 === 0 ? 5_000 : -5_000;
+    const bank = [makeBank(context, event, { amount: money(cents(event.amount) + delta) })];
     const ledger = [makeLedger(context, event)];
     return { caseId, category: "DISCREPANCY", expectedOutcome: "DISCREPANCY", reasonCode: "AMOUNT_DISCREPANCY", bankTransactions: bank, ledgerTransactions: ledger, truth: emptyTruth(event, bank, ledger), notes: "Related references and entities are present, but the amounts contradict without an explanatory record." };
+  }
+  if (ordinal % 10 === 9 || ordinal % 10 === 0) {
+    const duplicateBank = [
+      makeBank(context, event, { reference: null, counterparty: "Duplicate Usage Holdings", description: null, batchId: null }),
+      makeBank(context, event, { reference: null, counterparty: "Duplicate Usage Holdings", description: null, batchId: null }),
+    ];
+    const duplicateLedger = [
+      makeLedger(context, event, { reference: null, counterparty: "Duplicate Usage Holdings", description: null, batchId: null }),
+      makeLedger(context, event, { reference: null, counterparty: "Duplicate Usage Holdings", description: null, batchId: null }),
+    ];
+    return {
+      caseId,
+      category: "DISCREPANCY",
+      expectedOutcome: "DISCREPANCY",
+      reasonCode: "DUPLICATE_USAGE",
+      bankTransactions: duplicateBank,
+      ledgerTransactions: duplicateLedger,
+      truth: { ...emptyTruth(event, [duplicateBank[0]!], [duplicateLedger[0]!]), plausibleLedgerRecordIds: duplicateLedger.map((record) => record.ledgerTxnId) },
+      notes: "Two runtime proposals can target the same ledger record; stable consumption must reject the later use.",
+    };
   }
   const entity = chooseEntity(context);
   const conflictingEvent = createEvent(context, entity);
   const number = conflictingEvent.canonicalReference.replace("INV", "");
   const bank = [makeBank(context, conflictingEvent, {
     reference: `INV-${number}`,
-    counterparty: entity.variants[0] ?? entity.canonicalName,
+    counterparty: context.profile === "FINAL" ? `${entity.variants[0] ?? entity.canonicalName} Holdings` : entity.variants[0] ?? entity.canonicalName,
     description: `Payment for invoice ${number}`,
   })];
   const ledger = [makeLedger(context, conflictingEvent, {
