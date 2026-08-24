@@ -17,18 +17,60 @@ const outcomes: Array<{ value: OutcomeFilter; label: string }> = [
   { value: "UNRESOLVED", label: "Unresolved" },
 ];
 
+const surface = "rounded border border-tally-border bg-tally-surface";
+const sectionTitle = "m-0 mb-1 text-base font-semibold leading-[22px]";
+const sectionDescription = "m-0 text-tally-ink-secondary";
+const fieldLabel = "text-[11px] font-semibold uppercase leading-4 tracking-[.04em] text-tally-ink-muted";
+const control = "h-[38px] w-full rounded border border-tally-border bg-tally-surface px-[9px] py-[7px] text-tally-ink focus-visible:outline-tally-accent";
+const secondaryButton = "min-h-[38px] rounded border border-tally-border bg-tally-surface px-[14px] py-2 font-semibold text-tally-ink-secondary hover:bg-tally-surface-subtle";
+
+const outcomeStyles: Record<FinalOutcome, string> = {
+  RECONCILED: "bg-tally-success-soft text-tally-success",
+  EXPLAINED_OUTSTANDING: "bg-tally-warning-soft text-tally-warning",
+  DISCREPANCY: "bg-tally-danger-soft text-tally-danger",
+  UNRESOLVED: "bg-tally-warning-soft text-tally-warning",
+};
+
+const distributionStyles = {
+  RECONCILED: "bg-tally-success",
+  EXPLAINED_OUTSTANDING: "bg-tally-warning",
+  DISCREPANCY: "bg-tally-danger",
+  UNRESOLVED: "bg-tally-ink-muted",
+} as const;
+
 function percentage(value: number, total: number): string {
   return `${(total === 0 ? 0 : (value / total) * 100).toFixed(1)}%`;
+}
+
+function metricSeparatorClasses(index: number): string {
+  return [
+    "border-r",
+    index % 2 === 1 ? "border-r-0" : "",
+    index >= 2 ? "border-t" : "",
+    "sm:border-r",
+    index % 3 === 2 ? "sm:border-r-0" : "",
+    index === 2 ? "sm:border-t-0" : "",
+    index >= 3 ? "sm:border-t" : "",
+    "lg:border-r",
+    index === 5 ? "lg:border-r-0" : "",
+    "lg:border-t-0",
+  ].filter(Boolean).join(" ");
 }
 
 function outcomeLabel(outcome: FinalOutcome): string {
   return outcomes.find((item) => item.value === outcome)?.label ?? outcome;
 }
 
-function outcomeClass(outcome: FinalOutcome): string {
-  return outcome === "RECONCILED" ? "outcome-reconciled"
-    : outcome === "EXPLAINED_OUTSTANDING" ? "outcome-explained"
-      : outcome === "DISCREPANCY" ? "outcome-discrepancy" : "outcome-unresolved";
+function statusStyles(status: RunSummary["status"]): string {
+  return status === "COMPLETED"
+    ? "bg-tally-success-soft text-tally-success"
+    : status === "PROCESSING"
+      ? "bg-tally-warning-soft text-tally-warning"
+      : "bg-tally-danger-soft text-tally-danger";
+}
+
+function StatusBadge({ children, className }: { children: React.ReactNode; className: string }) {
+  return <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-[3px] text-xs font-semibold before:size-1.5 before:rounded-full before:bg-current before:content-[''] ${className}`}>{children}</span>;
 }
 
 export default function Dashboard() {
@@ -106,70 +148,57 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="app-shell">
-      <header className="topbar">
-        <a className="brand" href="/" aria-label="Tally dashboard"><span className="brand-mark">T</span><span>Tally</span></a>
-        <nav className="topbar-nav" aria-label="Primary navigation">
-          <a className="topbar-link active" href="/">Dashboard</a>
-          <a className="topbar-link" href="/trace">Trace</a>
-          <a className="topbar-link" href="/docs">Docs</a>
+    <div className="min-h-screen">
+      <header className="flex min-h-[52px] flex-wrap items-center gap-x-4 border-b border-tally-border bg-tally-surface px-4 sm:h-[52px] sm:flex-nowrap sm:px-6">
+        <a className="inline-flex items-center gap-[9px] text-[15px] font-semibold tracking-[-.01em] text-tally-ink no-underline" href="/" aria-label="Tally dashboard"><span className="grid size-5 place-items-center rounded border border-tally-ink text-[11px] font-bold">T</span><span>Tally</span></a>
+        <nav className="order-3 flex h-10 w-full gap-4 sm:order-none sm:ml-8 sm:h-full sm:w-auto sm:gap-5" aria-label="Primary navigation">
+          <a className="inline-flex items-center border-b-2 border-tally-accent font-semibold text-[13px] text-tally-ink no-underline" href="/">Dashboard</a>
+          <a className="inline-flex items-center border-b-2 border-transparent text-[13px] text-tally-ink-muted no-underline" href="/trace">Trace</a>
+          <a className="inline-flex items-center border-b-2 border-transparent text-[13px] text-tally-ink-muted no-underline" href="/docs">Docs</a>
         </nav>
-        <span className="topbar-context">Runtime reconciliation</span>
+        <span className="ml-auto text-xs text-tally-ink-muted">Runtime reconciliation</span>
       </header>
 
-      <main className="page">
-        <div className="page-heading">
+      <main className="mx-auto w-full max-w-[1440px] px-4 pb-14 pt-[22px] sm:px-6 sm:pt-7">
+        <div className="mb-6 flex flex-col items-start justify-between gap-6 sm:flex-row sm:gap-6">
           <div>
-            <div className="eyebrow">Operational dashboard</div>
-            <h1 className="page-title">Reconciliation control room</h1>
-            <p className="page-description">Run a bank-to-books reconciliation and inspect the persisted operational outcomes that need attention.</p>
+            <div className={fieldLabel}>Operational dashboard</div>
+            <h1 className="mb-[5px] mt-1 text-2xl font-semibold leading-[30px] tracking-[-.025em]">Reconciliation control room</h1>
+            <p className="m-0 max-w-[620px] text-tally-ink-secondary">Run a bank-to-books reconciliation and inspect the persisted operational outcomes that need attention.</p>
           </div>
-          {summary !== null && <div className="run-context"><span className="run-id">{summary.runId}</span><span className={`status-badge status-${summary.status.toLowerCase()}`}>{summary.status}</span></div>}
+          {summary !== null && <div className="mb-3 flex items-center justify-between gap-4"><span className="font-tally-mono text-xs">{summary.runId}</span><StatusBadge className={statusStyles(summary.status)}>{summary.status}</StatusBadge></div>}
         </div>
 
-        <form className="run-form" onSubmit={runReconciliation}>
-          <h2 className="section-title">Start a reconciliation run</h2>
-          <p className="section-description">Choose the two source files and the date used to evaluate outstanding timing differences.</p>
-          <div className="form-grid">
-            <label className="field" htmlFor="bank-file"><span className="field-label">Bank transactions CSV</span><input id="bank-file" className="file-input" type="file" accept=".csv,text/csv" onChange={(event) => selectCsvFile(event.target.files?.[0], "bank")} /><span className="field-help">{bankFile?.name ?? "No file selected"}</span></label>
-            <label className="field" htmlFor="ledger-file"><span className="field-label">Ledger transactions CSV</span><input id="ledger-file" className="file-input" type="file" accept=".csv,text/csv" onChange={(event) => selectCsvFile(event.target.files?.[0], "ledger")} /><span className="field-help">{ledgerFile?.name ?? "No file selected"}</span></label>
-            <label className="field" htmlFor="as-of-date"><span className="field-label">As-of date</span><input id="as-of-date" className="date-input" type="date" value={asOfDate} onChange={(event) => setAsOfDate(event.target.value)} /><span className="field-help">Required</span></label>
-            <button className="primary-button" type="submit" disabled={isRunning || bankFile === null || ledgerFile === null || asOfDate === ""}>{isRunning ? "Running…" : "Run reconciliation"}</button>
+        <form className={`${surface} mb-6 p-5`} onSubmit={runReconciliation}>
+          <h2 className={sectionTitle}>Start a reconciliation run</h2>
+          <p className={sectionDescription}>Choose the two source files and the date used to evaluate outstanding timing differences.</p>
+          <div className="mt-[18px] grid items-end gap-4 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_180px_auto]">
+            <label className="grid min-w-0 gap-1.5" htmlFor="bank-file"><span className={fieldLabel}>Bank transactions CSV</span><input id="bank-file" className={`${control} p-1.5 text-[13px] file:mr-2 file:rounded-[3px] file:border file:border-tally-border file:bg-tally-surface-subtle file:px-2 file:py-[5px] file:text-tally-ink-secondary`} type="file" accept=".csv,text/csv" onChange={(event) => selectCsvFile(event.target.files?.[0], "bank")} /><span className="min-h-[18px] text-xs text-tally-ink-muted">{bankFile?.name ?? "No file selected"}</span></label>
+            <label className="grid min-w-0 gap-1.5" htmlFor="ledger-file"><span className={fieldLabel}>Ledger transactions CSV</span><input id="ledger-file" className={`${control} p-1.5 text-[13px] file:mr-2 file:rounded-[3px] file:border file:border-tally-border file:bg-tally-surface-subtle file:px-2 file:py-[5px] file:text-tally-ink-secondary`} type="file" accept=".csv,text/csv" onChange={(event) => selectCsvFile(event.target.files?.[0], "ledger")} /><span className="min-h-[18px] text-xs text-tally-ink-muted">{ledgerFile?.name ?? "No file selected"}</span></label>
+            <label className="grid min-w-0 gap-1.5" htmlFor="as-of-date"><span className={fieldLabel}>As-of date</span><input id="as-of-date" className={control} type="date" value={asOfDate} onChange={(event) => setAsOfDate(event.target.value)} /><span className="min-h-[18px] text-xs text-tally-ink-muted">Required</span></label>
+            <button className="min-h-[38px] whitespace-nowrap rounded border border-tally-accent bg-tally-accent px-[14px] py-2 font-semibold text-white hover:bg-tally-accent/90 disabled:cursor-not-allowed disabled:opacity-[.55] sm:w-max lg:w-auto" type="submit" disabled={isRunning || bankFile === null || ledgerFile === null || asOfDate === ""}>{isRunning ? "Running…" : "Run reconciliation"}</button>
           </div>
-          {statusMessage !== null && <p className="form-status" role="status">{statusMessage}</p>}
-          {error !== null && <p className="form-error" role="alert">{error}</p>}
-          {readError !== null && activeRunId !== null && <div className="form-error" role="alert"><div>Run <span className="mono">{activeRunId}</span> was created, but its saved results could not be loaded.</div><button className="secondary-button retry-button" type="button" onClick={() => void loadRunData(activeRunId)} disabled={isLoadingResults}>{isLoadingResults ? "Retrying…" : "Retry loading results"}</button></div>}
+          {statusMessage !== null && <p className="mt-[14px] text-tally-ink-secondary" role="status">{statusMessage}</p>}
+          {error !== null && <p className="mt-[14px] border-l-[3px] border-tally-danger bg-tally-danger-soft px-3 py-2.5 text-tally-danger" role="alert">{error}</p>}
+          {readError !== null && activeRunId !== null && <div className="mt-[14px] border-l-[3px] border-tally-danger bg-tally-danger-soft px-3 py-2.5 text-tally-danger" role="alert"><div>Run <span className="font-tally-mono">{activeRunId}</span> was created, but its saved results could not be loaded.</div><button className={`${secondaryButton} mt-2.5`} type="button" onClick={() => void loadRunData(activeRunId)} disabled={isLoadingResults}>{isLoadingResults ? "Retrying…" : "Retry loading results"}</button></div>}
         </form>
 
         {summary === null ? (
-          <section className="run-form empty-state" aria-labelledby="ready-heading"><h2 id="ready-heading">Ready for a run</h2><p>Upload the bank and ledger CSVs above to see completion status, operational counts, and the persisted result list here.</p></section>
+          <section className={`${surface} px-6 py-14 text-center`} aria-labelledby="ready-heading"><h2 id="ready-heading" className="mb-2 text-lg font-semibold">Ready for a run</h2><p className="mx-auto m-0 max-w-[440px] text-tally-ink-secondary">Upload the bank and ledger CSVs above to see completion status, operational counts, and the persisted result list here.</p></section>
         ) : (
           <>
-            <section className="summary-region" aria-labelledby="summary-heading">
-              <h2 id="summary-heading" className="section-title">Run summary</h2>
-              <p className="section-description">Operational counts from {summary.runId}; no benchmark or ground-truth metrics are used.</p>
-              <div className="metric-strip">
-                <div className="metric"><span className="metric-label">Processed</span><strong className="metric-value">{total}</strong><span className="metric-subtext">final results</span></div>
-                <div className="metric"><span className="metric-label">Reconciled</span><strong className="metric-value">{reconciled}</strong><span className="metric-subtext">{percentage(reconciled, total)} of total</span></div>
-                <div className="metric"><span className="metric-label">Exceptions</span><strong className="metric-value">{explained + discrepancy + unresolved}</strong><span className="metric-subtext">needs review or context</span></div>
-                <div className="metric"><span className="metric-label">Explained outstanding</span><strong className="metric-value">{explained}</strong></div>
-                <div className="metric"><span className="metric-label">Discrepancies</span><strong className="metric-value">{discrepancy}</strong></div>
-                <div className="metric"><span className="metric-label">Resolution rate</span><strong className="metric-value">{percentage(resolved, total)}</strong><span className="metric-subtext">not unresolved</span></div>
+            <section className={`${surface} mb-6 p-[18px] sm:px-5 sm:pb-5`} aria-labelledby="summary-heading">
+              <h2 id="summary-heading" className={sectionTitle}>Run summary</h2>
+              <p className={sectionDescription}>Operational counts from {summary.runId}; no benchmark or ground-truth metrics are used.</p>
+              <div className="mt-4 grid grid-cols-2 border-y border-tally-border-subtle sm:grid-cols-3 lg:grid-cols-6">
+                {[["Processed", total, "final results"], ["Reconciled", reconciled, `${percentage(reconciled, total)} of total`], ["Exceptions", explained + discrepancy + unresolved, "needs review or context"], ["Explained outstanding", explained, ""], ["Discrepancies", discrepancy, ""], ["Resolution rate", percentage(resolved, total), "not unresolved"]].map(([label, value, subtext], index) => <div className={`${metricSeparatorClasses(index)} min-h-[82px] border-tally-border-subtle px-4 py-[13px] first:pl-0`} key={label}><span className={fieldLabel}>{label}</span><strong className="mt-1.5 block text-2xl font-semibold leading-7 tabular-nums">{value}</strong>{subtext !== "" && <span className="text-xs text-tally-ink-muted">{subtext}</span>}</div>)}
               </div>
-              <div className="distribution" aria-label="Outcome distribution">
-                <div className="distribution-bar" aria-hidden="true">{([
-                  ["segment-reconciled", reconciled],
-                  ["segment-explained", explained],
-                  ["segment-discrepancy", discrepancy],
-                  ["segment-unresolved", unresolved],
-                ] as Array<[string, number]>).filter(([, value]) => value > 0).map(([className, value]) => <span className={`distribution-segment ${className}`} key={className} style={{ width: `${value / total * 100}%` }} />)}</div>
-                <div className="distribution-legend"><span className="legend-item"><i className="legend-swatch segment-reconciled" />Reconciled {reconciled}</span><span className="legend-item"><i className="legend-swatch segment-explained" />Explained outstanding {explained}</span><span className="legend-item"><i className="legend-swatch segment-discrepancy" />Discrepancy {discrepancy}</span><span className="legend-item"><i className="legend-swatch segment-unresolved" />Unresolved {unresolved}</span></div>
-              </div>
+              <div className="mt-[18px] grid gap-[9px]" aria-label="Outcome distribution"><div className="flex h-2 overflow-hidden rounded-sm bg-tally-surface-subtle" aria-hidden="true">{(["RECONCILED", "EXPLAINED_OUTSTANDING", "DISCREPANCY", "UNRESOLVED"] as FinalOutcome[]).map((outcome) => { const value = { RECONCILED: reconciled, EXPLAINED_OUTSTANDING: explained, DISCREPANCY: discrepancy, UNRESOLVED: unresolved }[outcome]; return value > 0 ? <span className={`h-full ${distributionStyles[outcome]}`} style={{ width: `${value / total * 100}%` }} key={outcome} /> : null; })}</div><div className="flex flex-wrap gap-x-5 gap-y-3 text-xs text-tally-ink-secondary">{(["RECONCILED", "EXPLAINED_OUTSTANDING", "DISCREPANCY", "UNRESOLVED"] as FinalOutcome[]).map((outcome) => { const value = { RECONCILED: reconciled, EXPLAINED_OUTSTANDING: explained, DISCREPANCY: discrepancy, UNRESOLVED: unresolved }[outcome]; return <span className="inline-flex items-center gap-1.5" key={outcome}><i className={`size-2 rounded-sm ${distributionStyles[outcome]}`} />{outcomeLabel(outcome)} {value}</span>; })}</div></div>
             </section>
 
-            <section className="results-region" aria-labelledby="results-heading">
-              <div className="results-header"><div><h2 id="results-heading" className="section-title">Reconciliation results</h2><p className="section-description">{filteredResults.length} of {total} persisted results</p></div><div className="results-controls"><label className="filter-label" htmlFor="outcome-filter">Filter</label><select id="outcome-filter" className="filter-select" value={filter} onChange={(event) => setFilter(event.target.value as OutcomeFilter)}>{outcomes.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></div></div>
-              {filteredResults.length === 0 ? <div className="table-empty">No results match this outcome filter.</div> : <div className="table-scroll"><table className="results-table"><thead><tr><th scope="col">Case</th><th scope="col">Outcome</th><th scope="col">Bank records</th><th scope="col">Ledger records</th><th scope="col">Reason</th><th scope="col">Source</th></tr></thead><tbody>{filteredResults.map((result) => <tr key={result.resultId ?? result.caseId}><td><span className="result-id">{result.caseId}</span></td><td><span className={`outcome-badge ${outcomeClass(result.finalOutcome)}`}>{outcomeLabel(result.finalOutcome)}</span></td><td><div className="result-references">{result.bankTxnIds.length === 0 ? <span className="muted">—</span> : result.bankTxnIds.map((id) => <span className="reference-line" key={id}>{id}</span>)}</div></td><td><div className="result-references">{result.ledgerTxnIds.length === 0 ? <span className="muted">—</span> : result.ledgerTxnIds.map((id) => <span className="reference-line" key={id}>{id}</span>)}</div></td><td><span className="reason-code">{result.reasonCode}</span></td><td><span className="source-cell">{result.source ?? "—"}</span></td></tr>)}</tbody></table></div>}
+            <section className={`${surface} overflow-hidden`} aria-labelledby="results-heading">
+              <div className="flex flex-col items-start justify-between gap-4 border-b border-tally-border px-5 py-[18px] sm:flex-row sm:items-center"><div><h2 id="results-heading" className={sectionTitle}>Reconciliation results</h2><p className={sectionDescription}>{filteredResults.length} of {total} persisted results</p></div><div className="flex w-full items-center justify-between gap-2 sm:w-auto"><label className="text-xs text-tally-ink-muted" htmlFor="outcome-filter">Filter</label><select id="outcome-filter" className="h-[34px] flex-1 rounded border border-tally-border bg-tally-surface px-2 py-[5px] text-tally-ink sm:flex-none" value={filter} onChange={(event) => setFilter(event.target.value as OutcomeFilter)}>{outcomes.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></div></div>
+              {filteredResults.length === 0 ? <div className="px-5 py-9 text-center text-tally-ink-muted">No results match this outcome filter.</div> : <div className="overflow-x-auto"><table className="w-full min-w-[700px] border-collapse"><thead><tr><th className="bg-tally-surface-subtle px-4 py-2.5 text-left text-[11px] font-semibold uppercase leading-4 tracking-[.04em] text-tally-ink-muted" scope="col">Case</th><th className="bg-tally-surface-subtle px-4 py-2.5 text-left text-[11px] font-semibold uppercase leading-4 tracking-[.04em] text-tally-ink-muted" scope="col">Outcome</th><th className="bg-tally-surface-subtle px-4 py-2.5 text-left text-[11px] font-semibold uppercase leading-4 tracking-[.04em] text-tally-ink-muted" scope="col">Bank records</th><th className="bg-tally-surface-subtle px-4 py-2.5 text-left text-[11px] font-semibold uppercase leading-4 tracking-[.04em] text-tally-ink-muted" scope="col">Ledger records</th><th className="bg-tally-surface-subtle px-4 py-2.5 text-left text-[11px] font-semibold uppercase leading-4 tracking-[.04em] text-tally-ink-muted" scope="col">Reason</th><th className="bg-tally-surface-subtle px-4 py-2.5 text-left text-[11px] font-semibold uppercase leading-4 tracking-[.04em] text-tally-ink-muted" scope="col">Source</th></tr></thead><tbody>{filteredResults.map((result) => <tr className="hover:bg-tally-accent-soft" key={result.resultId ?? result.caseId}><td className="min-h-11 border-t border-tally-border-subtle px-4 py-3 align-middle"><span className="font-tally-mono text-xs">{result.caseId}</span></td><td className="min-h-11 border-t border-tally-border-subtle px-4 py-3 align-middle"><StatusBadge className={outcomeStyles[result.finalOutcome]}>{outcomeLabel(result.finalOutcome)}</StatusBadge></td><td className="min-h-11 border-t border-tally-border-subtle px-4 py-3 align-middle"><div className="grid gap-[3px]">{result.bankTxnIds.length === 0 ? <span className="text-tally-ink-muted">—</span> : result.bankTxnIds.map((id) => <span className="font-tally-mono text-xs text-tally-ink-secondary" key={id}>{id}</span>)}</div></td><td className="min-h-11 border-t border-tally-border-subtle px-4 py-3 align-middle"><div className="grid gap-[3px]">{result.ledgerTxnIds.length === 0 ? <span className="text-tally-ink-muted">—</span> : result.ledgerTxnIds.map((id) => <span className="font-tally-mono text-xs text-tally-ink-secondary" key={id}>{id}</span>)}</div></td><td className="min-h-11 border-t border-tally-border-subtle px-4 py-3 align-middle"><span className="text-[13px] text-tally-ink-secondary">{result.reasonCode}</span></td><td className="min-h-11 border-t border-tally-border-subtle px-4 py-3 align-middle"><span className="text-xs text-tally-ink-muted">{result.source ?? "—"}</span></td></tr>)}</tbody></table></div>}
             </section>
           </>
         )}

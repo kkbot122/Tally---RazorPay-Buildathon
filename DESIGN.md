@@ -98,6 +98,51 @@ Use a 4px base unit: `4, 8, 12, 16, 20, 24, 32, 40, 48, 64` px. The operational 
 - Operational surfaces may use the available viewport up to the 1440px application maximum. Do not constrain financial data tables to editorial reading widths.
 - Use left alignment for operational content. Center alignment is reserved for empty states or isolated confirmation messages.
 
+## Frontend Styling Implementation Rules
+
+These rules are part of the design system and are mandatory for every frontend task.
+
+### Tailwind CSS is the primary styling system
+
+All page and component styling must be implemented primarily with **Tailwind CSS utility classes**.
+
+Use Tailwind for:
+
+- layout (`flex`, `grid`, spacing, sizing, alignment)
+- typography
+- backgrounds and surfaces
+- borders and radii
+- interactive states
+- responsive behavior
+- tables
+- forms
+- buttons
+- filters
+- status treatments
+
+Component/page-specific handwritten CSS should not be the default implementation strategy.
+
+### Global CSS is limited to global concerns
+
+Plain/global CSS may be used only for concerns that genuinely belong at the application level, including:
+
+- Tailwind setup/imports
+- design-system CSS custom properties
+- font declarations
+- document/body defaults
+- global reset/base rules
+- global accessibility behavior
+- exceptional styles that Tailwind cannot reasonably express
+
+Do not create page-specific selectors such as:
+
+```css
+.dashboard {}
+.run-form {}
+.summary-card {}
+.result-row {}
+```
+
 ## Typography
 
 Prefer system/project-available fonts first; do not add a font dependency solely to imitate a reference. Use a readable sans for interface and documentation, with a monospace fallback only for machine identifiers and code.
