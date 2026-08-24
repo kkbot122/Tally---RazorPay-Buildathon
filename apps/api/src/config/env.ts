@@ -6,6 +6,8 @@ export const EnvSchema = z.object({
   DATABASE_URL: z.string().url().default("postgresql://localhost:5432/tally"),
   OPENAI_API_KEY: z.string().default(""),
   OPENAI_MODEL: z.string().trim().min(1).default("gpt-5.6-terra"),
+  AI_PROVIDER: z.enum(["openai", "nvidia"]).default("openai"),
+  AI_BASE_URL: z.string().url().optional(),
   WEB_ORIGIN: z.string().url().default("http://localhost:3000"),
   TALLY_E2E_DETERMINISTIC_ADAPTER: z.enum(["true", "false"]).optional(),
 });

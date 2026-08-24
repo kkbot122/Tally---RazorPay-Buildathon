@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { AgentProposalSchema } from "./proposal-schema.js";
 import { DEFAULT_REASONING_MODEL, OpenAIResponsesAdapter } from "./openai-responses-adapter.js";
 import { ReasoningAdapterError } from "./types.js";
+import { DEFAULT_NVIDIA_REASONING_MODEL, NvidiaChatCompletionsAdapter } from "./nvidia-chat-completions-adapter.js";
 
 const proposal = {
   proposedOutcome: "MATCH",
@@ -64,5 +65,26 @@ describe("OpenAIResponsesAdapter", () => {
     expect(error).toBeInstanceOf(ReasoningAdapterError);
     expect(error).toMatchObject({ code: "AI_REQUEST_ERROR" });
     expect((error as ReasoningAdapterError).cause).toBe(cause);
+  });
+});
+
+describe("NvidiaChatCompletionsAdapter", () => {
+  it("uses the NVIDIA chat endpoint contract and validates JSON proposals", async () => {
+    const create = vi.fn().mockResolvedValue({ choices: [{ message: { content: JSON.stringify(proposal) } }] });
+    const adapter = new NvidiaChatCompletionsAdapter({ client: { create } as never });
+
+    await expect(adapter.generateProposal({ input: "input" })).resolves.toEqual(proposal);
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({
+      model: DEFAULT_NVIDIA_REASONING_MODEL,
+      messages: [{ role: "user", content: "input" }],
+      response_format: { type: "json_object" },
+    }));
+  });
+
+  it("rejects invalid NVIDIA JSON output", async () => {
+    const create = vi.fn().mockResolvedValue({ choices: [{ message: { content: "not-json" } }] });
+    const adapter = new NvidiaChatCompletionsAdapter({ client: { create } as never });
+
+    await expect(adapter.generateProposal({ input: "input" })).rejects.toMatchObject({ code: "AI_SCHEMA_ERROR" });
   });
 });

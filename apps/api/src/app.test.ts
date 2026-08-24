@@ -15,6 +15,7 @@ const config = {
   DATABASE_URL: "postgresql://localhost:5432/tally",
   OPENAI_API_KEY: "",
   OPENAI_MODEL: "gpt-5.6-terra",
+  AI_PROVIDER: "openai" as const,
   WEB_ORIGIN: "http://localhost:3000",
 };
 

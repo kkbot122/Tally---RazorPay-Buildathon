@@ -1,6 +1,6 @@
 import { loadFrozenGroundTruth, loadFrozenPrimaryCaseAlignment } from "@tally/benchmark";
 import Fastify from "fastify";
-import { CsvValidationError, OpenAIResponsesAdapter } from "@tally/reconciliation";
+import { CsvValidationError, NvidiaChatCompletionsAdapter, OpenAIResponsesAdapter } from "@tally/reconciliation";
 import { ZodError } from "zod";
 import type { AppConfig } from "./config/env.js";
 import { loadConfig, useE2EDeterministicAdapter } from "./config/env.js";
@@ -67,7 +67,9 @@ export function buildApp(
     createReconciliationRunRepository(database.db),
     useE2EDeterministicAdapter(config)
       ? createE2EReasoningAdapter()
-      : new OpenAIResponsesAdapter({ apiKey: config.OPENAI_API_KEY, model: config.OPENAI_MODEL }),
+      : config.AI_PROVIDER === "nvidia"
+        ? new NvidiaChatCompletionsAdapter({ apiKey: config.OPENAI_API_KEY, model: config.OPENAI_MODEL, baseURL: config.AI_BASE_URL })
+        : new OpenAIResponsesAdapter({ apiKey: config.OPENAI_API_KEY, model: config.OPENAI_MODEL, baseURL: config.AI_BASE_URL }),
   ));
   const benchmarkEvaluationService = evaluationService ?? (database.db === undefined ? undefined : createBenchmarkEvaluationService(
       createReconciliationRunRepository(database.db),

@@ -103,11 +103,14 @@ export {
   buildReconciliationReasoningInput,
   DEFAULT_REASONING_MODEL,
   OpenAIResponsesAdapter,
+  DEFAULT_NVIDIA_REASONING_MODEL,
+  NvidiaChatCompletionsAdapter,
   RECONCILIATION_AGENT_INSTRUCTIONS,
   ReasoningAdapterError,
 } from "./src/agent/index.js";
 export type {
   OpenAIResponsesAdapterOptions,
+  NvidiaChatCompletionsAdapterOptions,
   ReasoningAdapterErrorCode,
   ReasoningModelAdapter,
   ReasoningModelInput,

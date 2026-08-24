@@ -16,6 +16,7 @@ type ResponsesParseClient = Pick<OpenAI["responses"], "parse">;
 export type OpenAIResponsesAdapterOptions = {
   model?: string;
   apiKey?: string;
+  baseURL?: string;
   client?: ResponsesParseClient;
 };
 
@@ -25,7 +26,7 @@ export class OpenAIResponsesAdapter implements ReasoningModelAdapter {
 
   constructor(options: OpenAIResponsesAdapterOptions = {}) {
     this.model = options.model ?? DEFAULT_REASONING_MODEL;
-    this.client = options.client ?? new OpenAI({ apiKey: options.apiKey }).responses;
+    this.client = options.client ?? new OpenAI({ apiKey: options.apiKey, baseURL: options.baseURL }).responses;
   }
 
   async generateProposal(input: ReasoningModelInput): Promise<AgentProposal> {
