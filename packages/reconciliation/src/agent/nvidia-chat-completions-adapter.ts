@@ -17,6 +17,7 @@ Return exactly one JSON object with these keys and no wrapper object:
   "reason": string
 }
 Do not use snake_case keys. Do not put the proposal under another key. Evidence must be an array of objects, not strings.
+Every evidence and conflictingEvidence object must include a non-empty recordIds array containing the exact record IDs that support that specific statement. Never omit recordIds, and never put record IDs only in the top-level bankRecordIds or ledgerRecordIds fields.
 `;
 
 type ChatCompletionsClient = Pick<OpenAI["chat"]["completions"], "create">;
@@ -44,43 +45,57 @@ export class NvidiaChatCompletionsAdapter implements ReasoningModelAdapter {
   }
 
   async generateProposal(input: ReasoningModelInput): Promise<AgentProposal> {
-    let response: Awaited<ReturnType<ChatCompletionsClient["create"]>>;
-    try {
-      const request = {
-        model: this.model,
-        messages: [{ role: "user", content: `${input.input}\n${NVIDIA_PROPOSAL_FORMAT}` }],
-        response_format: { type: "json_object" },
-        temperature: 0,
-        max_tokens: 16384,
-        ...(this.model.startsWith("nvidia/nemotron-3.5-lightning")
-          ? { chat_template_kwargs: { enable_thinking: this.reasoningEffort !== "none" } }
-          : { reasoning_effort: this.reasoningEffort }),
-      };
-      // NVIDIA's provider-specific chat_template_kwargs is intentionally outside
-      // the OpenAI SDK request type, but is part of NVIDIA's documented API.
-      response = await this.client.create(request as never);
-    } catch (error) {
-      throw new ReasoningAdapterError("AI_REQUEST_ERROR", "The NVIDIA reasoning request failed.", { cause: error });
-    }
+    const requestProposal = async (instruction: string) => {
+      try {
+        const request = {
+          model: this.model,
+          messages: [{ role: "user", content: instruction }],
+          response_format: { type: "json_object" },
+          temperature: 0,
+          max_tokens: 16384,
+          ...(this.model.startsWith("nvidia/nemotron-3.5-lightning")
+            ? { chat_template_kwargs: { enable_thinking: this.reasoningEffort !== "none" } }
+            : { reasoning_effort: this.reasoningEffort }),
+        };
+        // NVIDIA's provider-specific chat_template_kwargs is intentionally outside
+        // the OpenAI SDK request type, but is part of NVIDIA's documented API.
+        return await this.client.create(request as never);
+      } catch (error) {
+        throw new ReasoningAdapterError("AI_REQUEST_ERROR", "The NVIDIA reasoning request failed.", { cause: error });
+      }
+    };
 
-    if ("choices" in response === false || response.choices.length === 0) {
-      throw new ReasoningAdapterError("AI_SCHEMA_ERROR", "The NVIDIA response did not contain a model choice.");
-    }
-    const content = response.choices[0]?.message?.content;
-    if (typeof content !== "string") {
-      throw new ReasoningAdapterError("AI_SCHEMA_ERROR", "The NVIDIA response did not contain a JSON proposal.");
-    }
+    const parseProposal = (response: Awaited<ReturnType<ChatCompletionsClient["create"]>>) => {
+      if ("choices" in response === false || response.choices.length === 0) {
+        throw new ReasoningAdapterError("AI_SCHEMA_ERROR", "The NVIDIA response did not contain a model choice.");
+      }
+      const content = response.choices[0]?.message?.content;
+      if (typeof content !== "string") {
+        throw new ReasoningAdapterError("AI_SCHEMA_ERROR", "The NVIDIA response did not contain a JSON proposal.");
+      }
 
-    let candidate: unknown;
+      let candidate: unknown;
+      try {
+        candidate = JSON.parse(content);
+      } catch (error) {
+        throw new ReasoningAdapterError("AI_SCHEMA_ERROR", "The NVIDIA response was not valid JSON.", { cause: error });
+      }
+      const parsed = AgentProposalSchema.safeParse(candidate);
+      if (!parsed.success) {
+        throw new ReasoningAdapterError("AI_SCHEMA_ERROR", "The NVIDIA response did not contain a valid agent proposal.", { cause: parsed.error });
+      }
+      return parsed.data;
+    };
+
+    const instruction = `${input.input}\n${NVIDIA_PROPOSAL_FORMAT}`;
     try {
-      candidate = JSON.parse(content);
+      return parseProposal(await requestProposal(instruction));
     } catch (error) {
-      throw new ReasoningAdapterError("AI_SCHEMA_ERROR", "The NVIDIA response was not valid JSON.", { cause: error });
+      if (!(error instanceof ReasoningAdapterError) || error.code !== "AI_SCHEMA_ERROR") throw error;
+      const cause = error.cause instanceof Error ? error.cause.message : "The response did not match the required schema.";
+      return parseProposal(await requestProposal(
+        `${instruction}\n\nYour previous JSON was rejected. Return a corrected JSON object only. Fix these schema errors exactly: ${cause}`,
+      ));
     }
-    const parsed = AgentProposalSchema.safeParse(candidate);
-    if (!parsed.success) {
-      throw new ReasoningAdapterError("AI_SCHEMA_ERROR", "The NVIDIA response did not contain a valid agent proposal.", { cause: parsed.error });
-    }
-    return parsed.data;
   }
 }

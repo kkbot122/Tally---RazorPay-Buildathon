@@ -90,6 +90,19 @@ describe("NvidiaChatCompletionsAdapter", () => {
     await expect(adapter.generateProposal({ input: "input" })).rejects.toMatchObject({ code: "AI_SCHEMA_ERROR" });
   });
 
+  it("retries once with schema feedback when NVIDIA omits evidence record IDs", async () => {
+    const incomplete = { ...proposal, evidence: [{ ...proposal.evidence[0], recordIds: undefined }] };
+    const create = vi
+      .fn()
+      .mockResolvedValueOnce({ choices: [{ message: { content: JSON.stringify(incomplete) } }] })
+      .mockResolvedValueOnce({ choices: [{ message: { content: JSON.stringify(proposal) } }] });
+    const adapter = new NvidiaChatCompletionsAdapter({ client: { create } as never });
+
+    await expect(adapter.generateProposal({ input: "input" })).resolves.toEqual(proposal);
+    expect(create).toHaveBeenCalledTimes(2);
+    expect((create.mock.calls[1]![0] as { messages: [{ content: string }] }).messages[0].content).toContain("recordIds");
+  });
+
   it("uses Nemotron's chat-template thinking switch instead of DeepSeek reasoning_effort", async () => {
     const create = vi.fn().mockResolvedValue({ choices: [{ message: { content: JSON.stringify(proposal) } }] });
     const adapter = new NvidiaChatCompletionsAdapter({
