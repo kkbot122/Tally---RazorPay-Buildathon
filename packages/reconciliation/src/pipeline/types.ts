@@ -22,6 +22,19 @@ export type RunReconciliationInput = {
   clock?: () => Date;
 };
 
+export type ReconciliationOperationalErrorCode = "AI_SCHEMA_ERROR";
+
+/** A model proposal violated the runtime relationship contract. */
+export class ReconciliationOperationalError extends Error {
+  readonly code: ReconciliationOperationalErrorCode;
+
+  constructor(code: ReconciliationOperationalErrorCode, message: string) {
+    super(message);
+    this.name = "ReconciliationOperationalError";
+    this.code = code;
+  }
+}
+
 export type FinalReconciliationResult = {
   caseId: string;
   outcome: FinalOutcome;

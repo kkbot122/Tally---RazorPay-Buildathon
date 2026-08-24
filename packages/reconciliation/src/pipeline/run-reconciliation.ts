@@ -10,7 +10,7 @@ import { normalizeCounterpartyForExactComparison, normalizeCurrency, normalizeDa
 import { parseBankCsv, parseLedgerCsv } from "../parsing/index.js";
 import { verifyMatchProposal, verifyNonMatchProposal, type MatchVerificationResult, type NonMatchVerificationResult } from "../verifier/index.js";
 import { createTraceRecorder, type TraceRecorder } from "../trace/index.js";
-import type { FinalReconciliationResult, ReconciliationRunResult, RunReconciliationInput } from "./types.js";
+import { ReconciliationOperationalError, type FinalReconciliationResult, type ReconciliationRunResult, type RunReconciliationInput } from "./types.js";
 
 export const DEFAULT_REASONING_CONCURRENCY = 5;
 
@@ -221,6 +221,13 @@ function finalizeAgentProposal(
       });
   trace.record({ type: "VERIFICATION_CHECKED", caseId: item.caseId, payload: verificationPayload(verification) });
 
+  if (verification.status === "REJECTED" && verification.failures.some((failure) => isStructuralModelFailure(failure.code))) {
+    throw new ReconciliationOperationalError(
+      "AI_SCHEMA_ERROR",
+      "The model response contained an invalid reconciliation relationship.",
+    );
+  }
+
   const result = finalizeAgentResult(item.caseId, item.primary, proposal, verification);
   result.finalizationOrder = results.length + 1;
   trace.record({
@@ -235,6 +242,17 @@ function finalizeAgentProposal(
   });
   results.push(result);
   consumeFinalResult(result, item.primary, usedRecords, finalizedPrimaries);
+}
+
+function isStructuralModelFailure(code: string): boolean {
+  return new Set([
+    "NOT_RECONCILED_PROPOSAL",
+    "UNKNOWN_RECORD",
+    "OUT_OF_CONTEXT_RECORD",
+    "PRIMARY_NOT_INCLUDED",
+    "DUPLICATE_RECORD_ID",
+    "INVALID_RELATIONSHIP_SHAPE",
+  ]).has(code);
 }
 
 function normalizeRecords(records: RecordLookup, trace: TraceRecorder): void {

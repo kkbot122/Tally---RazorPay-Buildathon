@@ -331,17 +331,14 @@ describe("T023 end-to-end reconciliation pipeline", () => {
         proposedOutcome: "MATCH",
       }),
     };
-    const result = await runReconciliation({
+    await expect(runReconciliation({
       runId: "run-invalid-match-001",
       asOfDate: fixture.asOfDate,
       bankCsv: fixture.bankCsv,
       ledgerCsv: fixture.ledgerCsv,
       modelAdapter: adapter,
       clock: () => new Date("2026-01-01T00:00:00.000Z"),
-    });
-
-    const targetId = `BANK:${target.bankTransactions[0]!.bankTxnId}`;
-    expect(result.results.find((item) => item.caseId === targetId)).toMatchObject({ outcome: "UNRESOLVED", reasonCode: "VERIFICATION_FAILED" });
+    })).rejects.toMatchObject({ code: "AI_SCHEMA_ERROR" });
   });
 
   it("rejects parsing failures before producing a run result", async () => {

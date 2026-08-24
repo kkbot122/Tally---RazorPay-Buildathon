@@ -3,11 +3,11 @@ import { describe, expect, it, vi } from "vitest";
 import { buildApp, type DatabaseHandle } from "./app.js";
 import { BenchmarkEvaluationError, type BenchmarkEvaluationResponse } from "./benchmark-evaluation-service.js";
 import type { ReconciliationRunService } from "./run-service.js";
-import { createReconciliationRunService } from "./run-service.js";
+import { createReconciliationRunService, RunFailedError, TraceUnavailableError } from "./run-service.js";
 import type { ReconciliationRunRepository } from "./db/reconciliation-run-repository.js";
 import type { PersistCompletedRunInput } from "./db/reconciliation-run-repository.js";
 import { buildDevFixture, type BenchmarkCase } from "@tally/benchmark";
-import type { AgentProposal, ReasoningModelAdapter } from "@tally/reconciliation";
+import { OpenAIResponsesAdapter, ReasoningAdapterError, type AgentProposal, type ReasoningModelAdapter } from "@tally/reconciliation";
 
 const config = {
   NODE_ENV: "test" as const,
@@ -39,6 +39,7 @@ function createTestService(overrides: Partial<ReconciliationRunService> = {}): R
       unresolved: 0,
     }),
     getResults: async () => [{ caseId: "BANK:B1" }, { caseId: "BANK:B2" }],
+    getResult: async (_runId, caseId) => ({ caseId }),
     getExceptions: async () => [{ caseId: "BANK:B2", finalOutcome: "DISCREPANCY" }],
     getTrace: async () => [{ sequenceNo: 1 }, { sequenceNo: 2 }],
     ...overrides,
@@ -172,6 +173,8 @@ describe("reconciliation routes", () => {
     const fixture = buildDevFixture();
     const saved = vi.fn<(input: PersistCompletedRunInput) => Promise<void>>(async () => {});
     const repo = {
+      startRun: vi.fn(async () => {}),
+      markRunFailed: vi.fn(async () => {}),
       saveCompletedRun: saved,
       getRunById: async () => undefined,
       getResultsForRun: async () => [],
@@ -216,6 +219,111 @@ describe("reconciliation routes", () => {
     await app.close();
   });
 
+  it("rejects malformed CSV before the pipeline and persistence boundary", async () => {
+    const fixture = buildDevFixture();
+    const saved = vi.fn(async () => {});
+    const repo = {
+      startRun: vi.fn(async () => {}),
+      markRunFailed: vi.fn(async () => {}),
+      saveCompletedRun: saved,
+      getRunById: async () => undefined,
+      getResultsForRun: async () => [],
+      getTraceForRun: async () => [],
+    } satisfies ReconciliationRunRepository;
+    const invalidCsvAdapter: ReasoningModelAdapter = { generateProposal: vi.fn() };
+    const service = createReconciliationRunService(repo, invalidCsvAdapter, undefined, () => "run-invalid-csv");
+    const app = buildApp(config, createTestDatabase(), service);
+    const response = await app.inject({ method: "POST", url: "/api/runs", payload: {
+      asOfDate: fixture.asOfDate,
+      bankCsv: "not,a,valid,bank,csv",
+      ledgerCsv: fixture.ledgerCsv,
+    } });
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({ error: "INVALID_CSV" });
+    expect(saved).not.toHaveBeenCalled();
+    expect(response.body).not.toContain("RECONCILED");
+    expect(response.body).not.toContain("UNRESOLVED");
+    await app.close();
+  });
+
+  it("returns a sanitized 500 when the repository fails at run creation", async () => {
+    const repository = {
+      startRun: vi.fn(async () => { throw new Error("postgresql://user:db-secret@host/tally"); }),
+      markRunFailed: vi.fn(async () => {}),
+      saveCompletedRun: vi.fn(async () => {}),
+      getRunById: vi.fn(async () => undefined),
+      getResultsForRun: vi.fn(async () => []),
+      getTraceForRun: vi.fn(async () => []),
+    } satisfies ReconciliationRunRepository;
+    const service = createReconciliationRunService(repository, { generateProposal: vi.fn() }, undefined, () => "run-db-failure");
+    const app = buildApp(config, createTestDatabase(), service);
+    const response = await app.inject({ method: "POST", url: "/api/runs", payload: {
+      asOfDate: "2026-08-23",
+      bankCsv: "bank_txn_id,booking_date,value_date,amount,currency,direction,reference,counterparty,description,batch_id\nB1,2026-08-23,2026-08-23,100,INR,CREDIT,BANK-ONLY,Bank,Payment,",
+      ledgerCsv: "ledger_txn_id,accounting_date,maturity_date,amount,currency,direction,reference,counterparty,description,source,batch_id\nL1,2026-08-23,2026-08-23,100,INR,CREDIT,LEDGER-ONLY,Ledger,Receipt,ERP,",
+    } });
+    expect(response.statusCode).toBe(500);
+    expect(response.json()).toEqual({ error: "SYSTEM_ERROR", message: "The reconciliation run could not be completed." });
+    expect(response.body).not.toContain("db-secret");
+    expect(repository.markRunFailed).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("persists a failed status when the model boundary fails", async () => {
+    const repository = {
+      startRun: vi.fn(async () => {}),
+      markRunFailed: vi.fn(async () => {}),
+      saveCompletedRun: vi.fn(async () => {}),
+      getRunById: vi.fn(async () => undefined),
+      getResultsForRun: vi.fn(async () => []),
+      getTraceForRun: vi.fn(async () => []),
+    } satisfies ReconciliationRunRepository;
+    const adapter: ReasoningModelAdapter = {
+      generateProposal: vi.fn(async () => { throw new ReasoningAdapterError("AI_REQUEST_ERROR", "OPENAI_API_KEY=sentinel"); }),
+    };
+    const service = createReconciliationRunService(repository, adapter, undefined, () => "run-ai-failure");
+    const app = buildApp(config, createTestDatabase(), service);
+    const response = await app.inject({ method: "POST", url: "/api/runs", payload: {
+      asOfDate: "2026-08-23",
+      bankCsv: "bank_txn_id,booking_date,value_date,amount,currency,direction,reference,counterparty,description,batch_id\nB1,2026-08-23,2026-08-23,100,INR,CREDIT,BANK-ONLY,Bank,Payment,",
+      ledgerCsv: "ledger_txn_id,accounting_date,maturity_date,amount,currency,direction,reference,counterparty,description,source,batch_id\nL1,2026-08-23,2026-08-23,100,INR,CREDIT,LEDGER-ONLY,Ledger,Receipt,ERP,",
+    } });
+    expect(response.statusCode).toBe(500);
+    expect(response.json()).toEqual({ error: "SYSTEM_ERROR", message: "The reconciliation run could not be completed." });
+    expect(response.body).not.toContain("OPENAI_API_KEY");
+    expect(repository.startRun).toHaveBeenCalledOnce();
+    expect(repository.markRunFailed).toHaveBeenCalledWith("run-ai-failure", "AI_REQUEST_ERROR");
+    expect(repository.saveCompletedRun).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it.each([
+    ["malformed output", async () => ({ output_parsed: null })],
+    ["provider rejection", async () => { throw new Error("provider detail"); }],
+  ])("maps the real OpenAI adapter %s through the API boundary", async (_name, parse) => {
+    const repository = {
+      startRun: vi.fn(async () => {}),
+      markRunFailed: vi.fn(async () => {}),
+      saveCompletedRun: vi.fn(async () => {}),
+      getRunById: vi.fn(async () => undefined),
+      getResultsForRun: vi.fn(async () => []),
+      getTraceForRun: vi.fn(async () => []),
+    } satisfies ReconciliationRunRepository;
+    const adapter = new OpenAIResponsesAdapter({ client: { parse } as never });
+    const service = createReconciliationRunService(repository, adapter, undefined, () => `run-openai-${_name.replace(" ", "-")}`);
+    const app = buildApp(config, createTestDatabase(), service);
+    const response = await app.inject({ method: "POST", url: "/api/runs", payload: {
+      asOfDate: "2026-08-23",
+      bankCsv: "bank_txn_id,booking_date,value_date,amount,currency,direction,reference,counterparty,description,batch_id\nB1,2026-08-23,2026-08-23,100,INR,CREDIT,BANK-ONLY,Bank,Payment,",
+      ledgerCsv: "ledger_txn_id,accounting_date,maturity_date,amount,currency,direction,reference,counterparty,description,source,batch_id\nL1,2026-08-23,2026-08-23,100,INR,CREDIT,LEDGER-ONLY,Ledger,Receipt,ERP,",
+    } });
+    expect(response.statusCode).toBe(500);
+    expect(response.json()).toEqual({ error: "SYSTEM_ERROR", message: "The reconciliation run could not be completed." });
+    expect(repository.markRunFailed).toHaveBeenCalledOnce();
+    expect(repository.saveCompletedRun).not.toHaveBeenCalled();
+    await app.close();
+  });
+
   it("rejects truth fields and client-controlled run IDs", async () => {
     const createRun = vi.fn(async () => ({ runId: "server-run", status: "COMPLETED" as const }));
     const app = buildApp(config, createTestDatabase(), createTestService({ createRun }));
@@ -240,9 +348,56 @@ describe("reconciliation routes", () => {
     const app = buildApp(config, createTestDatabase(), createTestService({ createRun }));
     const response = await app.inject({ method: "POST", url: "/api/runs", payload: { asOfDate: "2026-08-23", bankCsv: "bank", ledgerCsv: "ledger" } });
     expect(response.statusCode).toBe(500);
-    expect(response.json()).toEqual({ error: "reconciliation run failed" });
+    expect(response.json()).toEqual({ error: "SYSTEM_ERROR", message: "The reconciliation run could not be completed." });
     expect(response.body).not.toContain("postgres password");
     expect(createRun).toHaveBeenCalledOnce();
+    await app.close();
+  });
+
+  it("returns a sanitized system error for database failures on read routes", async () => {
+    const app = buildApp(config, createTestDatabase(), createTestService({
+      getSummary: async () => { throw new Error("postgresql://user:secret@host/db"); },
+    }));
+    const response = await app.inject({ method: "GET", url: "/api/runs/run-api-001", headers: { authorization: "Bearer bearer-sentinel" } });
+    expect(response.statusCode).toBe(500);
+    expect(response.json()).toEqual({ error: "SYSTEM_ERROR", message: "The service is temporarily unavailable." });
+    expect(response.body).not.toContain("secret");
+    expect(response.body).not.toContain("postgresql");
+    expect(response.body).not.toContain("bearer-sentinel");
+    await app.close();
+  });
+
+  it("does not expose empty finance data for a failed run", async () => {
+    const app = buildApp(config, createTestDatabase(), createTestService({
+      getSummary: async () => { throw new RunFailedError(); },
+      getResults: async () => { throw new RunFailedError(); },
+    }));
+    const summary = await app.inject({ method: "GET", url: "/api/runs/run-api-001" });
+    const results = await app.inject({ method: "GET", url: "/api/runs/run-api-001/results" });
+    expect(summary.statusCode).toBe(500);
+    expect(summary.json()).toEqual({ error: "RUN_FAILED", message: "This reconciliation run failed and has no finance results." });
+    expect(results.statusCode).toBe(500);
+    expect(results.json()).toEqual({ error: "RUN_FAILED", message: "This reconciliation run failed and has no finance results." });
+    await app.close();
+  });
+
+  it("distinguishes missing traces from empty successful traces", async () => {
+    const app = buildApp(config, createTestDatabase(), createTestService({
+      getTrace: async () => { throw new TraceUnavailableError(); },
+    }));
+    const response = await app.inject({ method: "GET", url: "/api/runs/run-api-001/trace" });
+    expect(response.statusCode).toBe(404);
+    expect(response.json()).toEqual({ error: "TRACE_NOT_FOUND", message: "Trace data is unavailable for this run." });
+    await app.close();
+  });
+
+  it("returns resource-specific 404s for unknown cases", async () => {
+    const app = buildApp(config, createTestDatabase(), createTestService({
+      getResult: async () => undefined,
+    }));
+    const response = await app.inject({ method: "GET", url: "/api/runs/run-api-001/results/BANK%3Aunknown" });
+    expect(response.statusCode).toBe(404);
+    expect(response.json()).toEqual({ error: "CASE_NOT_FOUND", message: "Case result not found for this run." });
     await app.close();
   });
 

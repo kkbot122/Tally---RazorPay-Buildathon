@@ -162,4 +162,12 @@ describe("T032 reconciliation trace", () => {
     await waitFor(() => expect(screen.getByRole("heading", { name: "Trace could not be loaded" })).toBeTruthy());
     expect(screen.queryByText("database alignment failure")).toBeNull();
   });
+
+  it("shows an explicit unavailable state when the run has no persisted trace", async () => {
+    api.getRunTrace.mockRejectedValueOnce({ code: "TRACE_NOT_FOUND", message: "Trace data is unavailable for this run." });
+    render(<TracePage runId="empty-trace" />);
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Trace unavailable" })).toBeTruthy());
+    expect(screen.getByText("This run has no persisted execution trace. No events were synthesized.")).toBeTruthy();
+    expect(screen.queryByText("No recorded events match these filters.")).toBeNull();
+  });
 });

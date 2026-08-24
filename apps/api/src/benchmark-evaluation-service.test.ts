@@ -38,6 +38,8 @@ function persistedResult(overrides: Record<string, unknown> = {}) {
 
 function repository(overrides: Partial<ReconciliationRunRepository> = {}): ReconciliationRunRepository {
   return {
+    startRun: vi.fn(async () => {}),
+    markRunFailed: vi.fn(async () => {}),
     saveCompletedRun: vi.fn(async () => {}),
     getRunById: vi.fn(async () => ({ status: "COMPLETED" } as never)),
     getResultsForRun: vi.fn(async () => [persistedResult()] as never),

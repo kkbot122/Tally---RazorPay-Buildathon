@@ -30,15 +30,30 @@ export type RunResult = {
 
 const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
 
+export class ApiRequestError extends Error {
+  readonly code: string;
+  readonly status: number;
+
+  constructor(code: string, message: string, status: number) {
+    super(message);
+    this.name = "ApiRequestError";
+    this.code = code;
+    this.status = status;
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${apiBaseUrl}${path}`, { ...init, headers: { "Content-Type": "application/json", ...init?.headers } });
   if (!response.ok) {
     let message = `Request failed (${response.status})`;
+    let code = "REQUEST_FAILED";
     try {
-      const body = await response.json() as { error?: string };
-      if (body.error) message = body.error;
+      const body = await response.json() as { error?: string; message?: string };
+      if (body.error) code = body.error;
+      if (body.message) message = body.message;
+      else if (body.error) message = body.error;
     } catch { /* Keep the status message when the response is not JSON. */ }
-    throw new Error(message);
+    throw new ApiRequestError(code, message, response.status);
   }
   return response.json() as Promise<T>;
 }

@@ -3,6 +3,8 @@ import {
   parseBankCsv,
   parseLedgerCsv,
   runReconciliation,
+  ReasoningAdapterError,
+  ReconciliationOperationalError,
   type ReasoningModelAdapter,
   type ReconciliationRunResult,
 } from "@tally/reconciliation";
@@ -30,8 +32,27 @@ export interface ReconciliationRunService {
   createRun(request: CreateRunRequest): Promise<{ runId: string; status: "COMPLETED" }>;
   getSummary(runId: string): Promise<RunSummary | undefined>;
   getResults(runId: string): Promise<unknown[] | undefined>;
+  getResult(runId: string, caseId: string): Promise<unknown | undefined>;
   getExceptions(runId: string): Promise<unknown[] | undefined>;
   getTrace(runId: string): Promise<unknown[] | undefined>;
+}
+
+export class TraceUnavailableError extends Error {
+  readonly code = "TRACE_NOT_FOUND" as const;
+
+  constructor() {
+    super("Trace data is unavailable for this run.");
+    this.name = "TraceUnavailableError";
+  }
+}
+
+export class RunFailedError extends Error {
+  readonly code = "RUN_FAILED" as const;
+
+  constructor() {
+    super("This reconciliation run failed and has no finance results.");
+    this.name = "RunFailedError";
+  }
 }
 
 export type RunSummary = {
@@ -59,19 +80,30 @@ export function createReconciliationRunService(
       parseBankCsv(validatedRequest.bankCsv);
       parseLedgerCsv(validatedRequest.ledgerCsv);
       const runId = generateRunId();
-      const result = await pipeline({
-        runId,
-        asOfDate: validatedRequest.asOfDate,
-        bankCsv: validatedRequest.bankCsv,
-        ledgerCsv: validatedRequest.ledgerCsv,
-        modelAdapter,
-      });
-      await repository.saveCompletedRun(toPersistenceInput(validatedRequest.asOfDate, result));
+      await repository.startRun({ runId, asOfDate: validatedRequest.asOfDate });
+      try {
+        const result = await pipeline({
+          runId,
+          asOfDate: validatedRequest.asOfDate,
+          bankCsv: validatedRequest.bankCsv,
+          ledgerCsv: validatedRequest.ledgerCsv,
+          modelAdapter,
+        });
+        await repository.saveCompletedRun(toPersistenceInput(validatedRequest.asOfDate, result));
+      } catch (error) {
+        try {
+          await repository.markRunFailed(runId, failureCode(error));
+        } catch {
+          // Preserve the original provider/pipeline/persistence failure.
+        }
+        throw error;
+      }
       return { runId, status: "COMPLETED" as const };
     },
     async getSummary(runId) {
       const run = await repository.getRunById(runId);
       if (run === undefined) return undefined;
+      if (run.status === "FAILED") throw new RunFailedError();
       const results = await repository.getResultsForRun(runId);
       return {
         runId,
@@ -84,8 +116,15 @@ export function createReconciliationRunService(
       };
     },
     async getResults(runId) {
-      if (await repository.getRunById(runId) === undefined) return undefined;
+      const run = await repository.getRunById(runId);
+      if (run === undefined) return undefined;
+      if (run.status === "FAILED") throw new RunFailedError();
       return repository.getResultsForRun(runId);
+    },
+    async getResult(runId, caseId) {
+      const results = await this.getResults(runId);
+      if (results === undefined) return undefined;
+      return results.find((result) => (result as { caseId?: unknown }).caseId === caseId);
     },
     async getExceptions(runId) {
       const results = await this.getResults(runId);
@@ -97,9 +136,16 @@ export function createReconciliationRunService(
     },
     async getTrace(runId) {
       if (await repository.getRunById(runId) === undefined) return undefined;
-      return repository.getTraceForRun(runId);
+      const trace = await repository.getTraceForRun(runId);
+      if (trace.length === 0) throw new TraceUnavailableError();
+      return trace;
     },
   };
+}
+
+function failureCode(error: unknown): string {
+  if (error instanceof ReasoningAdapterError || error instanceof ReconciliationOperationalError) return error.code;
+  return "SYSTEM_ERROR";
 }
 
 function toPersistenceInput(asOfDate: string, result: ReconciliationRunResult): PersistCompletedRunInput {

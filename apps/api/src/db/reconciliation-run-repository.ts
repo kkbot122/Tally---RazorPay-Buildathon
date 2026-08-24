@@ -44,7 +44,14 @@ export type PersistCompletedRunInput = {
   trace: readonly PersistedTraceEvent[];
 };
 
+export type StartRunInput = {
+  runId: string;
+  asOfDate: string;
+};
+
 export interface ReconciliationRunRepository {
+  startRun(input: StartRunInput): Promise<void>;
+  markRunFailed(runId: string, failureCode: string): Promise<void>;
   saveCompletedRun(input: PersistCompletedRunInput): Promise<void>;
   getRunById(runId: string): Promise<typeof reconciliationRuns.$inferSelect | undefined>;
   getResultsForRun(runId: string): Promise<(typeof reconciliationResults.$inferSelect)[]>;
@@ -53,6 +60,23 @@ export interface ReconciliationRunRepository {
 
 export function createReconciliationRunRepository(db: DatabaseClient): ReconciliationRunRepository {
   return {
+    async startRun(input) {
+      await db.insert(reconciliationRuns).values({
+        runId: input.runId,
+        asOfDate: input.asOfDate,
+        status: "PROCESSING",
+        startedAt: new Date(),
+        configuration: { asOfDate: input.asOfDate },
+        modelMetadata: {},
+      });
+    },
+    async markRunFailed(runId, failureCode) {
+      await db.update(reconciliationRuns).set({
+        status: "FAILED",
+        completedAt: new Date(),
+        modelMetadata: { failureCode },
+      }).where(eq(reconciliationRuns.runId, runId));
+    },
     async saveCompletedRun(input) {
       validatePersistCompletedRunInput(input);
       const startedAt = new Date(input.trace[0]!.occurredAt);
@@ -74,7 +98,17 @@ export function createReconciliationRunRepository(db: DatabaseClient): Reconcili
           totalLedgerRecords,
           configuration: { asOfDate: input.asOfDate },
           modelMetadata: {},
-        });
+        }).onConflictDoNothing({ target: reconciliationRuns.runId });
+        await tx.update(reconciliationRuns).set({
+          asOfDate: input.asOfDate,
+          status: "COMPLETED",
+          startedAt,
+          completedAt,
+          totalBankRecords,
+          totalLedgerRecords,
+          configuration: { asOfDate: input.asOfDate },
+          modelMetadata: {},
+        }).where(eq(reconciliationRuns.runId, input.runId));
 
         const proposalRows = input.results
           .map((result) => mapProposalRow(input.runId, result, proposalEvents.get(result.caseId)))

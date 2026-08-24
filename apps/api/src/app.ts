@@ -7,7 +7,7 @@ import { loadConfig, useE2EDeterministicAdapter } from "./config/env.js";
 import { createDatabase } from "./db/client.js";
 import { createReconciliationRunRepository } from "./db/reconciliation-run-repository.js";
 import { BenchmarkEvaluationError, createBenchmarkEvaluationService, type BenchmarkEvaluationResponse } from "./benchmark-evaluation-service.js";
-import { CreateRunRequestSchema, createReconciliationRunService, type ReconciliationRunService } from "./run-service.js";
+import { CreateRunRequestSchema, createReconciliationRunService, RunFailedError, TraceUnavailableError, type ReconciliationRunService } from "./run-service.js";
 import { createE2EReasoningAdapter } from "./e2e-reasoning-adapter.js";
 
 const EVALUATION_TRUTH_FIELDS = new Set([
@@ -41,6 +41,11 @@ export function buildApp(
   evaluationService?: BenchmarkEvaluationService,
 ) {
   const app = Fastify({ logger: true });
+  app.setErrorHandler((error, request, reply) => {
+    request.log.error(error, "request failed");
+    if (error instanceof RunFailedError) return reply.code(500).send({ error: error.code, message: error.message });
+    return reply.code(500).send({ error: "SYSTEM_ERROR", message: "The service is temporarily unavailable." });
+  });
   const runService = service ?? (database.db === undefined ? undefined : createReconciliationRunService(
     createReconciliationRunRepository(database.db),
     useE2EDeterministicAdapter(config)
@@ -104,42 +109,63 @@ export function buildApp(
   });
 
   app.post("/api/runs", async (request, reply) => {
-    if (runService === undefined) return reply.code(503).send({ error: "run service unavailable" });
+    if (runService === undefined) return reply.code(503).send({ error: "SERVICE_UNAVAILABLE", message: "The reconciliation service is unavailable." });
     const parsed = CreateRunRequestSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: "invalid run request", details: parsed.error.flatten() });
     try {
       return await runService.createRun(parsed.data);
     } catch (error) {
       request.log.error(error, "reconciliation run failed");
-      if (error instanceof CsvValidationError || error instanceof ZodError) {
-        return reply.code(400).send({ error: "invalid run request" });
+      if (error instanceof CsvValidationError) {
+        return reply.code(400).send({ error: "INVALID_CSV", message: "The uploaded CSV is invalid.", details: error.issues });
       }
-      return reply.code(500).send({ error: "reconciliation run failed" });
+      if (error instanceof ZodError) {
+        return reply.code(400).send({ error: "INVALID_REQUEST", message: "The run request is invalid." });
+      }
+      return reply.code(500).send({ error: "SYSTEM_ERROR", message: "The reconciliation run could not be completed." });
     }
   });
 
   app.get("/api/runs/:runId", async (request, reply) => {
-    if (runService === undefined) return reply.code(503).send({ error: "run service unavailable" });
+    if (runService === undefined) return reply.code(503).send({ error: "SERVICE_UNAVAILABLE", message: "The reconciliation service is unavailable." });
     const summary = await runService.getSummary((request.params as { runId: string }).runId);
-    return summary === undefined ? reply.code(404).send({ error: "run not found" }) : summary;
+    return summary === undefined ? reply.code(404).send({ error: "RUN_NOT_FOUND", message: "Run not found." }) : summary;
   });
 
   app.get("/api/runs/:runId/results", async (request, reply) => {
-    if (runService === undefined) return reply.code(503).send({ error: "run service unavailable" });
+    if (runService === undefined) return reply.code(503).send({ error: "SERVICE_UNAVAILABLE", message: "The reconciliation service is unavailable." });
     const results = await runService.getResults((request.params as { runId: string }).runId);
-    return results === undefined ? reply.code(404).send({ error: "run not found" }) : results;
+    return results === undefined ? reply.code(404).send({ error: "RUN_NOT_FOUND", message: "Run not found." }) : results;
+  });
+
+  app.get("/api/runs/:runId/results/:caseId", async (request, reply) => {
+    if (runService === undefined) return reply.code(503).send({ error: "SERVICE_UNAVAILABLE", message: "The reconciliation service is unavailable." });
+    const { runId, caseId } = request.params as { runId: string; caseId: string };
+    const result = await runService.getResult(runId, caseId);
+    if (result !== undefined) return result;
+    const run = await runService.getSummary(runId);
+    return run === undefined
+      ? reply.code(404).send({ error: "RUN_NOT_FOUND", message: "Run not found." })
+      : reply.code(404).send({ error: "CASE_NOT_FOUND", message: "Case result not found for this run." });
   });
 
   app.get("/api/runs/:runId/exceptions", async (request, reply) => {
-    if (runService === undefined) return reply.code(503).send({ error: "run service unavailable" });
+    if (runService === undefined) return reply.code(503).send({ error: "SERVICE_UNAVAILABLE", message: "The reconciliation service is unavailable." });
     const exceptions = await runService.getExceptions((request.params as { runId: string }).runId);
-    return exceptions === undefined ? reply.code(404).send({ error: "run not found" }) : exceptions;
+    return exceptions === undefined ? reply.code(404).send({ error: "RUN_NOT_FOUND", message: "Run not found." }) : exceptions;
   });
 
   const traceHandler = async (request: { params: unknown }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => {
-    if (runService === undefined) return reply.code(503).send({ error: "run service unavailable" });
-    const trace = await runService.getTrace((request.params as { runId: string }).runId);
-    return trace === undefined ? reply.code(404).send({ error: "run not found" }) : trace;
+    if (runService === undefined) return reply.code(503).send({ error: "SERVICE_UNAVAILABLE", message: "The reconciliation service is unavailable." });
+    try {
+      const trace = await runService.getTrace((request.params as { runId: string }).runId);
+      return trace === undefined ? reply.code(404).send({ error: "RUN_NOT_FOUND", message: "Run not found." }) : trace;
+    } catch (error) {
+      if (error instanceof TraceUnavailableError) {
+        return reply.code(404).send({ error: error.code, message: error.message });
+      }
+      throw error;
+    }
   };
   app.get("/api/runs/:runId/events", traceHandler);
   app.get("/api/runs/:runId/trace", traceHandler);

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ReconciliationRunResult, ReasoningModelAdapter } from "@tally/reconciliation";
 
-import { createReconciliationRunService, type CreateRunRequest } from "./run-service.js";
+import { createReconciliationRunService, RunFailedError, type CreateRunRequest } from "./run-service.js";
 import type { ReconciliationRunRepository } from "./db/reconciliation-run-repository.js";
 
 const bankCsv = [
@@ -19,12 +19,21 @@ function request(overrides: Partial<CreateRunRequest> = {}): CreateRunRequest {
 
 function repository(overrides: Partial<ReconciliationRunRepository> = {}): ReconciliationRunRepository {
   return {
+    startRun: vi.fn(async () => {}),
+    markRunFailed: vi.fn(async () => {}),
     saveCompletedRun: vi.fn(async () => {}),
     getRunById: vi.fn(async () => undefined),
     getResultsForRun: vi.fn(async () => []),
     getTraceForRun: vi.fn(async () => []),
     ...overrides,
   };
+}
+
+function failedRunRepository(): ReconciliationRunRepository {
+  return repository({
+    getRunById: vi.fn(async () => ({ status: "FAILED" } as never)),
+    getResultsForRun: vi.fn(async () => [{ finalOutcome: "RECONCILED" }] as never),
+  });
 }
 
 function result(runId: string): ReconciliationRunResult {
@@ -64,6 +73,7 @@ describe("reconciliation run service", () => {
     await expect(service.createRun(request())).rejects.toThrow("pipeline failed");
     expect(runPipeline).toHaveBeenCalledOnce();
     expect(repo.saveCompletedRun).not.toHaveBeenCalled();
+    expect(repo.markRunFailed).toHaveBeenCalledOnce();
   });
 
   it("does not rerun the pipeline when persistence fails", async () => {
@@ -73,5 +83,12 @@ describe("reconciliation run service", () => {
 
     await expect(service.createRun(request())).rejects.toThrow("persistence failed");
     expect(runPipeline).toHaveBeenCalledOnce();
+  });
+
+  it("does not expose finance results for a persisted failed run", async () => {
+    const service = createReconciliationRunService(failedRunRepository(), adapter);
+    await expect(service.getSummary("run-failed")).rejects.toBeInstanceOf(RunFailedError);
+    await expect(service.getResults("run-failed")).rejects.toBeInstanceOf(RunFailedError);
+    await expect(service.getExceptions("run-failed")).rejects.toBeInstanceOf(RunFailedError);
   });
 });

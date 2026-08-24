@@ -61,6 +61,16 @@ describe("T030 dashboard workflows", () => {
     await waitFor(() => expect(api.createRun).toHaveBeenCalledOnce());
   });
 
+  it("renders an operational error without finance metrics or an unresolved result", async () => {
+    api.createRun.mockRejectedValueOnce({ code: "SYSTEM_ERROR", message: "The service is temporarily unavailable." });
+    render(<Dashboard />);
+    fillForm();
+    fireEvent.submit(screen.getByRole("button", { name: "Run reconciliation" }).closest("form")!);
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("No finance outcome was produced"));
+    expect(screen.queryByRole("region", { name: "Run summary" })).toBeNull();
+    expect(screen.queryByText("Unresolved")).toBeNull();
+  });
+
   it("turns two immediate submissions into one POST and sends File.text contents", async () => {
     let resolveRun!: (value: { runId: string; status: "COMPLETED" }) => void;
     api.createRun.mockReturnValue(new Promise((resolve) => { resolveRun = resolve; }));

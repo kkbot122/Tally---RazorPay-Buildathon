@@ -1,4 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { randomUUID } from "node:crypto";
 
 import { createDatabase } from "./client.js";
 import {
@@ -72,6 +73,10 @@ function event(
   };
 }
 
+function testRunId(label: string): string {
+  return `t036-${label}-${randomUUID()}`;
+}
+
 describeDatabase("PostgreSQL reconciliation persistence", () => {
   const database = createDatabase(databaseUrl!);
   const repository = createReconciliationRunRepository(database.db);
@@ -91,7 +96,7 @@ describeDatabase("PostgreSQL reconciliation persistence", () => {
   });
 
   it("round-trips results, raw verifier data, nested payloads, and signed deltas", async () => {
-    const input = inputFor("db-round-trip");
+    const input = inputFor(testRunId("round-trip"));
     runIds.push(input.runId);
     const before = structuredClone(input);
 
@@ -106,14 +111,15 @@ describeDatabase("PostgreSQL reconciliation persistence", () => {
       amountDeltaPaise: "-5000",
       evidence: before.results[0]!.evidence,
     }]);
-    await expect(repository.getTraceForRun(input.runId)).resolves.toMatchObject([{
+    const persistedTrace = await repository.getTraceForRun(input.runId);
+    expect(persistedTrace[2]).toMatchObject({
       eventId: `${input.runId}:event:3`,
       payload: before.trace[2]!.payload,
-    }]);
+    });
   });
 
   it("rejects a duplicate run without overwriting its history", async () => {
-    const input = inputFor("db-duplicate");
+    const input = inputFor(testRunId("duplicate"));
     runIds.push(input.runId);
     await repository.saveCompletedRun(input);
     await expect(repository.saveCompletedRun(input)).rejects.toThrow();
@@ -121,8 +127,21 @@ describeDatabase("PostgreSQL reconciliation persistence", () => {
     expect((await repository.getTraceForRun(input.runId))).toHaveLength(input.trace.length);
   });
 
+  it("persists PROCESSING to FAILED without finance rows or unsafe failure details", async () => {
+    const runId = testRunId("failed-lifecycle");
+    runIds.push(runId);
+    await repository.startRun({ runId, asOfDate: "2026-08-23" });
+    await repository.markRunFailed(runId, "AI_REQUEST_ERROR");
+
+    await expect(repository.getRunById(runId)).resolves.toMatchObject({ runId, status: "FAILED" });
+    await expect(repository.getResultsForRun(runId)).resolves.toEqual([]);
+    await expect(repository.getTraceForRun(runId)).resolves.toEqual([]);
+    const metadata = await database.sql`select model_metadata from reconciliation_runs where run_id = ${runId}`;
+    expect(metadata[0]?.model_metadata).toEqual({ failureCode: "AI_REQUEST_ERROR" });
+  });
+
   it("rolls back run, results, proposals, verification, and trace when the late trace insert fails", async () => {
-    const input = inputFor("db-rollback");
+    const input = inputFor(testRunId("rollback"));
     runIds.push(input.runId);
     (input.trace as PersistedTraceEvent[])[input.trace.length - 1] = {
       ...input.trace[input.trace.length - 1]!,
@@ -142,7 +161,7 @@ describeDatabase("PostgreSQL reconciliation persistence", () => {
   });
 
   it("enforces unique run sequence numbers at the database boundary", async () => {
-    const input = inputFor("db-sequence-unique");
+    const input = inputFor(testRunId("sequence-unique"));
     runIds.push(input.runId);
     await repository.saveCompletedRun(input);
     await expect(database.sql`

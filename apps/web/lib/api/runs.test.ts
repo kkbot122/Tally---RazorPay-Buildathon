@@ -36,4 +36,21 @@ describe("runtime run API client", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/runs/run-test/trace", expect.anything());
     expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual(["/api/runs/run-test/trace"]);
   });
+
+  it("preserves only the sanitized error code and message from a failed API response", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      error: "SYSTEM_ERROR",
+      message: "The service is temporarily unavailable.",
+      details: "OPENAI_API_KEY=sentinel",
+    }), { status: 500 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getRun("run-secret")).rejects.toMatchObject({
+      name: "ApiRequestError",
+      code: "SYSTEM_ERROR",
+      status: 500,
+      message: "The service is temporarily unavailable.",
+    });
+    await expect(getRun("run-secret")).rejects.not.toThrow("OPENAI_API_KEY");
+  });
 });

@@ -39,6 +39,10 @@ const distributionStyles = {
   UNRESOLVED: "bg-tally-ink-muted",
 } as const;
 
+function errorCode(error: unknown): string | undefined {
+  return error !== null && typeof error === "object" && "code" in error && typeof error.code === "string" ? error.code : undefined;
+}
+
 function percentage(value: number, total: number): string {
   return `${(total === 0 ? 0 : (value / total) * 100).toFixed(1)}%`;
 }
@@ -85,7 +89,9 @@ export default function Dashboard() {
   const [isRunning, setIsRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [readError, setReadError] = useState<string | null>(null);
+  const [readErrorCode, setReadErrorCode] = useState<string | undefined>(undefined);
   const [isLoadingResults, setIsLoadingResults] = useState(false);
+  const [hasLoadedRunData, setHasLoadedRunData] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [selectedResult, setSelectedResult] = useState<RunResult | null>(null);
   const submissionLock = useRef(createSubmissionLock());
@@ -119,13 +125,17 @@ export default function Dashboard() {
   async function loadRunData(runId: string) {
     setIsLoadingResults(true);
     setReadError(null);
+    setReadErrorCode(undefined);
     try {
       const [nextSummary, nextResults] = await Promise.all([getRun(runId), getRunResults(runId)]);
       setSummary(nextSummary);
       setResults(nextResults);
+      setHasLoadedRunData(true);
       setFilter("ALL");
     } catch (readFailure) {
+      setHasLoadedRunData(false);
       setReadError(readFailure instanceof Error ? readFailure.message : "Run data could not be loaded.");
+      setReadErrorCode(errorCode(readFailure));
     } finally {
       setIsLoadingResults(false);
     }
@@ -140,6 +150,12 @@ export default function Dashboard() {
     if (bankFile === null || ledgerFile === null) return;
     if (!submissionLock.current.tryAcquire()) return;
     setError(null);
+    setReadError(null);
+    setReadErrorCode(undefined);
+    setSummary(null);
+    setResults([]);
+    setActiveRunId(null);
+    setHasLoadedRunData(false);
     setStatusMessage("Reading files and starting reconciliation…");
     setIsRunning(true);
     try {
@@ -152,7 +168,9 @@ export default function Dashboard() {
       await loadRunData(created.runId);
       setStatusMessage(null);
     } catch (runError) {
-      setError(runError instanceof Error ? runError.message : "Reconciliation could not be completed.");
+      setError(errorCode(runError) === "SYSTEM_ERROR"
+        ? "The reconciliation service is temporarily unavailable. No finance outcome was produced."
+        : runError instanceof Error ? runError.message : "Reconciliation could not be completed.");
       setStatusMessage(null);
     } finally {
       submissionLock.current.release();
@@ -193,11 +211,13 @@ export default function Dashboard() {
           </div>
           {statusMessage !== null && <p className="mt-[14px] text-tally-ink-secondary" role="status">{statusMessage}</p>}
           {error !== null && <p className="mt-[14px] border-l-[3px] border-tally-danger bg-tally-danger-soft px-3 py-2.5 text-tally-danger" role="alert">{error}</p>}
-          {readError !== null && activeRunId !== null && <div className="mt-[14px] border-l-[3px] border-tally-danger bg-tally-danger-soft px-3 py-2.5 text-tally-danger" role="alert"><div>Run <span className="font-tally-mono">{activeRunId}</span> was created, but its saved results could not be loaded.</div><button className={`${secondaryButton} mt-2.5`} type="button" onClick={() => void loadRunData(activeRunId)} disabled={isLoadingResults}>{isLoadingResults ? "Retrying…" : "Retry loading results"}</button></div>}
+          {readError !== null && activeRunId !== null && <div className="mt-[14px] border-l-[3px] border-tally-danger bg-tally-danger-soft px-3 py-2.5 text-tally-danger" role="alert"><div>{readErrorCode === "RUN_FAILED" ? `Run ${activeRunId} failed operationally; no finance outcome was produced.` : <>Run <span className="font-tally-mono">{activeRunId}</span> was created, but its saved results could not be loaded.</>}</div><button className={`${secondaryButton} mt-2.5`} type="button" onClick={() => void loadRunData(activeRunId)} disabled={isLoadingResults}>{isLoadingResults ? "Retrying…" : "Retry loading results"}</button></div>}
         </form>
 
         {summary === null ? (
           <section className={`${surface} px-6 py-14 text-center`} aria-labelledby="ready-heading"><h2 id="ready-heading" className="mb-2 text-lg font-semibold">Ready for a run</h2><p className="mx-auto m-0 max-w-[440px] text-tally-ink-secondary">Upload the bank and ledger CSVs above to see completion status, operational counts, and the persisted result list here.</p></section>
+        ) : !hasLoadedRunData ? (
+          <section className={`${surface} px-6 py-14 text-center`} role="alert" aria-labelledby="results-unavailable-heading"><h2 id="results-unavailable-heading" className="mb-2 text-lg font-semibold">{readErrorCode === "RUN_FAILED" ? "Run failed" : "Run results unavailable"}</h2><p className="mx-auto m-0 max-w-[440px] text-tally-ink-secondary">{readErrorCode === "RUN_FAILED" ? "This operational failure produced no finance results. Resolve the underlying service issue before retrying." : "The run was created, but persisted finance results are not available yet. Use the retry control above to load them again."}</p></section>
         ) : (
           <>
             <section className={`${surface} mb-6 p-[18px] sm:px-5 sm:pb-5`} aria-labelledby="summary-heading">

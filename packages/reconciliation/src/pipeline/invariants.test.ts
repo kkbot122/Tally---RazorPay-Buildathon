@@ -6,6 +6,7 @@ import type { CandidateSet } from "../candidates/index.js";
 import type { ParsedBankTransaction, ParsedLedgerTransaction } from "../parsing/types.js";
 import { verifyMatchProposal } from "../verifier/index.js";
 import { runReconciliation } from "./run-reconciliation.js";
+import { ReconciliationOperationalError } from "./types.js";
 import type { ReasoningModelAdapter } from "../agent/index.js";
 
 const LEDGER_HEADERS = "ledger_txn_id,accounting_date,maturity_date,amount,currency,direction,reference,counterparty,description,source,batch_id";
@@ -118,10 +119,11 @@ function matchProposal(bankRecordIds: string[], ledgerRecordIds: string[], evide
 
 describe("T034 core engine safety invariants", () => {
   it("rejects reconciliation when currencies differ", async () => {
-    const result = await runCase([{ id: "B1", currency: "INR" }], [{ id: "L1", currency: "USD" }], adapter((id) => proposalFor(id, ["L1"])),);
-    expect(result.results.some((item) => item.outcome === "RECONCILED")).toBe(false);
-    expect(result.usedRecords.bankRecordIds.size).toBe(0);
-    expect(result.usedRecords.ledgerRecordIds.size).toBe(0);
+    await expect(runCase(
+      [{ id: "B1", currency: "INR" }],
+      [{ id: "L1", currency: "USD" }],
+      adapter((id) => proposalFor(id, ["L1"])),
+    )).rejects.toMatchObject({ code: "AI_SCHEMA_ERROR" });
   });
 
   it("never auto-reconciles when amounts differ", async () => {
@@ -145,14 +147,11 @@ describe("T034 core engine safety invariants", () => {
   });
 
   it("prevents a later AI proposal from reusing a record committed by a deterministic rule", async () => {
-    const result = await runCase(
+    await expect(runCase(
       [{ id: "B1", reference: "REF-1", counterparty: "Acme" }, { id: "B2", reference: "OTHER-REF", counterparty: "Other" }],
       [{ id: "L1", reference: "REF-1", counterparty: "Acme" }],
       adapter((id) => proposalFor(id, ["L1"])),
-    );
-    expect(result.results.filter((item) => item.outcome === "RECONCILED")).toHaveLength(1);
-    expect(result.results.find((item) => item.caseId === "BANK:B2")).toMatchObject({ outcome: "UNRESOLVED", reasonCode: "VERIFICATION_FAILED" });
-    expect(result.usedRecords.ledgerRecordIds).toEqual(new Set(["L1"]));
+    )).rejects.toMatchObject({ code: "AI_SCHEMA_ERROR" });
   });
 
   it("rejects candidate groups larger than three records", () => {
@@ -177,9 +176,11 @@ describe("T034 core engine safety invariants", () => {
   });
 
   it("rejects AI proposals containing unknown record IDs", async () => {
-    const result = await runCase([{ id: "B1", reference: "BANK-ONLY", counterparty: "Bank Counterparty" }], [{ id: "L1", reference: "LEDGER-ONLY", counterparty: "Ledger Counterparty" }], adapter((id) => proposalFor(id, ["L404"])));
-    expect(result.results.some((item) => item.outcome === "RECONCILED")).toBe(false);
-    expect(result.results.flatMap((item) => item.ledgerRecordIds)).not.toContain("L404");
+    await expect(runCase(
+      [{ id: "B1", reference: "BANK-ONLY", counterparty: "Bank Counterparty" }],
+      [{ id: "L1", reference: "LEDGER-ONLY", counterparty: "Ledger Counterparty" }],
+      adapter((id) => proposalFor(id, ["L404"])),
+    )).rejects.toMatchObject({ name: "ReconciliationOperationalError", code: "AI_SCHEMA_ERROR" });
   });
 
   it("rejects semantic matches supported only by equal amount in the full AMOUNT_AND_DATE pipeline path", async () => {

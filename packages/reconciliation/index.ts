@@ -137,9 +137,10 @@ export type {
   TraceRecorderOptions,
 } from "./src/trace/index.js";
 
-export { DEFAULT_REASONING_CONCURRENCY, runReconciliation } from "./src/pipeline/index.js";
+export { DEFAULT_REASONING_CONCURRENCY, ReconciliationOperationalError, runReconciliation } from "./src/pipeline/index.js";
 export type {
   FinalReconciliationResult,
+  ReconciliationOperationalErrorCode,
   ReconciliationRunResult,
   RunReconciliationInput,
 } from "./src/pipeline/index.js";
