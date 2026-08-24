@@ -1,7 +1,8 @@
 import type { ReactNode } from "react";
+import "./globals.css";
 
 export const metadata = {
-  title: "Finance Reconciliation Agent",
+  title: "Tally — Reconciliation Control Room",
   description: "Bank-to-books reconciliation dashboard",
 };
 
