@@ -70,6 +70,9 @@ export function buildApp(
       : config.AI_PROVIDER === "nvidia"
         ? new NvidiaChatCompletionsAdapter({ apiKey: config.OPENAI_API_KEY, model: config.OPENAI_MODEL, baseURL: config.AI_BASE_URL, reasoningEffort: config.AI_REASONING_EFFORT })
         : new OpenAIResponsesAdapter({ apiKey: config.OPENAI_API_KEY, model: config.OPENAI_MODEL, baseURL: config.AI_BASE_URL }),
+    undefined,
+    undefined,
+    (event) => app.log.warn(event, "model proposal rejected by verifier"),
   ));
   const benchmarkEvaluationService = evaluationService ?? (database.db === undefined ? undefined : createBenchmarkEvaluationService(
       createReconciliationRunRepository(database.db),

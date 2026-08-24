@@ -294,7 +294,10 @@ describe("reconciliation routes", () => {
     expect(response.json()).toEqual({ error: "SYSTEM_ERROR", message: "The reconciliation run could not be completed." });
     expect(response.body).not.toContain("OPENAI_API_KEY");
     expect(repository.startRun).toHaveBeenCalledOnce();
-    expect(repository.markRunFailed).toHaveBeenCalledWith("run-ai-failure", "AI_REQUEST_ERROR");
+    expect(repository.markRunFailed).toHaveBeenCalledWith("run-ai-failure", "AI_REQUEST_ERROR", expect.arrayContaining([
+      expect.objectContaining({ type: "RUN_STARTED" }),
+      expect.objectContaining({ type: "AGENT_STARTED" }),
+    ]));
     expect(repository.saveCompletedRun).not.toHaveBeenCalled();
     await app.close();
   });
@@ -319,10 +322,16 @@ describe("reconciliation routes", () => {
       bankCsv: "bank_txn_id,booking_date,value_date,amount,currency,direction,reference,counterparty,description,batch_id\nB1,2026-08-23,2026-08-23,100,INR,CREDIT,BANK-ONLY,Bank,Payment,",
       ledgerCsv: "ledger_txn_id,accounting_date,maturity_date,amount,currency,direction,reference,counterparty,description,source,batch_id\nL1,2026-08-23,2026-08-23,100,INR,CREDIT,LEDGER-ONLY,Ledger,Receipt,ERP,",
     } });
-    expect(response.statusCode).toBe(500);
-    expect(response.json()).toEqual({ error: "SYSTEM_ERROR", message: "The reconciliation run could not be completed." });
-    expect(repository.markRunFailed).toHaveBeenCalledOnce();
-    expect(repository.saveCompletedRun).not.toHaveBeenCalled();
+    if (_name === "malformed output") {
+      expect(response.statusCode).toBe(200);
+      expect(repository.saveCompletedRun).toHaveBeenCalledOnce();
+      expect(repository.markRunFailed).not.toHaveBeenCalled();
+    } else {
+      expect(response.statusCode).toBe(500);
+      expect(response.json()).toEqual({ error: "SYSTEM_ERROR", message: "The reconciliation run could not be completed." });
+      expect(repository.markRunFailed).toHaveBeenCalledOnce();
+      expect(repository.saveCompletedRun).not.toHaveBeenCalled();
+    }
     await app.close();
   });
 

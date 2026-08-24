@@ -1,7 +1,7 @@
 import type { AgentProposal, FinalOutcome, ReasonCode } from "@tally/contracts";
 import pLimit from "p-limit";
 
-import { buildReconciliationReasoningInput, type ReasoningPrimary } from "../agent/index.js";
+import { buildReconciliationReasoningInput, ReasoningAdapterError, type ReasoningPrimary } from "../agent/index.js";
 import type { CandidatePrimary, CandidateSet } from "../candidates/index.js";
 import { generateCandidates } from "../candidates/index.js";
 import { createRecordLookup, type RecordLookup, type UsedRecordState } from "../compatibility/index.js";
@@ -10,7 +10,7 @@ import { normalizeCounterpartyForExactComparison, normalizeCurrency, normalizeDa
 import { parseBankCsv, parseLedgerCsv } from "../parsing/index.js";
 import { verifyMatchProposal, verifyNonMatchProposal, type MatchVerificationResult, type NonMatchVerificationResult } from "../verifier/index.js";
 import { createTraceRecorder, type TraceRecorder } from "../trace/index.js";
-import { ReconciliationOperationalError, type FinalReconciliationResult, type ReconciliationRunResult, type RunReconciliationInput } from "./types.js";
+import { type FinalReconciliationResult, type ReconciliationRunResult, type RunReconciliationInput } from "./types.js";
 
 export const DEFAULT_REASONING_CONCURRENCY = 5;
 
@@ -173,16 +173,30 @@ export async function runReconciliation(input: RunReconciliationInput): Promise<
           candidateCount: item.candidateSet.candidates.length,
         },
       });
-      const proposal = await input.modelAdapter.generateProposal(item.promptInput);
-      trace.record({ type: "AGENT_PROPOSED", caseId: item.caseId, payload: proposal });
-      return proposal;
+      try {
+        return await generateProposalWithVerifierRetry(item, input.modelAdapter, records, input.asOfDate, waveSnapshot, trace);
+      } catch (error) {
+        if (!(error instanceof ReasoningAdapterError) || error.code !== "AI_SCHEMA_ERROR") throw error;
+        input.onVerificationFailure?.({
+          caseId: item.caseId,
+          proposedBankRecordIds: [],
+          proposedLedgerRecordIds: [],
+          failureCodes: [error.code],
+        });
+        const fallback = insufficientEvidenceProposal(item.primary);
+        trace.record({ type: "AGENT_PROPOSED", caseId: item.caseId, payload: fallback });
+        return fallback;
+      }
     })));
 
     for (let itemIndex = 0; itemIndex < preparedItems.length; itemIndex += 1) {
       const item = preparedItems[itemIndex]!;
       const settlement = settlements[itemIndex]!;
-      if (settlement.status === "rejected") throw settlement.reason;
-      finalizeAgentProposal(item, settlement.value, records, input.asOfDate, usedRecords, finalizedPrimaries, results, trace);
+      if (settlement.status === "rejected") {
+        attachTrace(settlement.reason, trace);
+        throw settlement.reason;
+      }
+      finalizeAgentProposal(item, settlement.value, records, input.asOfDate, usedRecords, finalizedPrimaries, results, trace, input.onVerificationFailure);
     }
   }
 
@@ -207,26 +221,18 @@ function finalizeAgentProposal(
   finalizedPrimaries: Set<string>,
   results: FinalReconciliationResult[],
   trace: TraceRecorder,
+  onVerificationFailure?: RunReconciliationInput["onVerificationFailure"],
 ): void {
-  const verification = proposal.proposedOutcome === "MATCH"
-    ? verifyMatchProposal({ proposal, primary: item.primary, candidateSet: item.candidateSet, records, usedRecords })
-    : verifyNonMatchProposal({
-        proposal,
-        primary: item.primary,
-        candidateSet: item.candidateSet,
-        records,
-        usedRecords,
-        runContext: { asOfDate },
-        reasoningContext: { deterministicReason: item.decision.reason === "MULTIPLE_CANDIDATES" || item.decision.reason === "GROUPING_AMBIGUITY" ? item.decision.reason : undefined },
-      });
-  trace.record({ type: "VERIFICATION_CHECKED", caseId: item.caseId, payload: verificationPayload(verification) });
-
-  if (verification.status === "REJECTED" && verification.failures.some((failure) => isStructuralModelFailure(failure.code))) {
-    throw new ReconciliationOperationalError(
-      "AI_SCHEMA_ERROR",
-      "The model response contained an invalid reconciliation relationship.",
-    );
+  const verification = verifyAgentProposal(item, proposal, records, asOfDate, usedRecords);
+  if (verification.status === "REJECTED") {
+    onVerificationFailure?.({
+      caseId: item.caseId,
+      proposedBankRecordIds: [...proposal.bankRecordIds],
+      proposedLedgerRecordIds: [...proposal.ledgerRecordIds],
+      failureCodes: verification.failures.map((failure) => failure.code),
+    });
   }
+  trace.record({ type: "VERIFICATION_CHECKED", caseId: item.caseId, payload: verificationPayload(verification) });
 
   const result = finalizeAgentResult(item.caseId, item.primary, proposal, verification);
   result.finalizationOrder = results.length + 1;
@@ -253,6 +259,83 @@ function isStructuralModelFailure(code: string): boolean {
     "DUPLICATE_RECORD_ID",
     "INVALID_RELATIONSHIP_SHAPE",
   ]).has(code);
+}
+
+async function generateProposalWithVerifierRetry(
+  item: PreparedReasoningItem,
+  modelAdapter: RunReconciliationInput["modelAdapter"],
+  records: RecordLookup,
+  asOfDate: string,
+  usedRecords: UsedRecordState,
+  trace: TraceRecorder,
+): Promise<AgentProposal> {
+  let proposal = await modelAdapter.generateProposal(item.promptInput);
+  trace.record({ type: "AGENT_PROPOSED", caseId: item.caseId, payload: proposal });
+
+  for (let attempt = 0; attempt < 1; attempt += 1) {
+    const verification = verifyAgentProposal(item, proposal, records, asOfDate, usedRecords);
+    if (verification.status !== "REJECTED" || !verification.failures.some((failure) => isStructuralModelFailure(failure.code))) return proposal;
+    const feedback = verification.failures.map((failure) => ({
+      code: failure.code,
+      message: failure.message,
+      recordIds: failure.recordIds ?? [],
+    }));
+    proposal = await modelAdapter.generateProposal({
+      ...item.promptInput,
+      retryFeedback: JSON.stringify({ caseId: item.caseId, proposedBankRecordIds: proposal.bankRecordIds, proposedLedgerRecordIds: proposal.ledgerRecordIds, verifierFailures: feedback }),
+    });
+    trace.record({ type: "AGENT_PROPOSED", caseId: item.caseId, payload: proposal });
+  }
+  return proposal;
+}
+
+function verifyAgentProposal(
+  item: PreparedReasoningItem,
+  proposal: AgentProposal,
+  records: RecordLookup,
+  asOfDate: string,
+  usedRecords: UsedRecordState,
+): MatchVerificationResult | NonMatchVerificationResult {
+  return proposal.proposedOutcome === "MATCH"
+    ? verifyMatchProposal({ proposal, primary: item.primary, candidateSet: item.candidateSet, records, usedRecords })
+    : verifyNonMatchProposal({
+        proposal,
+        primary: item.primary,
+        candidateSet: item.candidateSet,
+        records,
+        usedRecords,
+        runContext: { asOfDate },
+        reasoningContext: { deterministicReason: item.decision.reason === "MULTIPLE_CANDIDATES" || item.decision.reason === "GROUPING_AMBIGUITY" ? item.decision.reason : undefined },
+      });
+}
+
+function attachTrace(error: unknown, trace: TraceRecorder): void {
+  if (error !== null && typeof error === "object") {
+    Object.defineProperty(error, "reconciliationTrace", {
+      configurable: true,
+      enumerable: false,
+      value: trace.getEvents(),
+    });
+  }
+}
+
+function insufficientEvidenceProposal(primary: CandidatePrimary): AgentProposal {
+  const bankRecordIds = primary.side === "BANK" ? [primary.recordId] : [];
+  const ledgerRecordIds = primary.side === "LEDGER" ? [primary.recordId] : [];
+  return {
+    proposedOutcome: "INSUFFICIENT_EVIDENCE",
+    bankRecordIds,
+    ledgerRecordIds,
+    confidence: "LOW",
+    evidence: [{
+      statement: "The model response could not be validated; no finance relationship was accepted.",
+      source: "DETERMINISTIC",
+      kind: "DETERMINISTIC",
+      recordIds: [...bankRecordIds, ...ledgerRecordIds],
+    }],
+    conflictingEvidence: [],
+    reason: "The model response could not be validated, so this case remains unresolved.",
+  };
 }
 
 function normalizeRecords(records: RecordLookup, trace: TraceRecorder): void {

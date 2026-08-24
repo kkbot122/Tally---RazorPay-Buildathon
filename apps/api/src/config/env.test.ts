@@ -31,6 +31,11 @@ describe("API environment configuration", () => {
     expect(() => EnvSchema.parse({ WEB_ORIGIN: "not-a-url" })).toThrow();
   });
 
+  it("selects a valid NVIDIA model when the OpenAI default is left unchanged", () => {
+    expect(loadConfig({ AI_PROVIDER: "nvidia" }).OPENAI_MODEL).toBe("nvidia/nemotron-3.5-lightning-30b-a3b");
+    expect(loadConfig({ AI_PROVIDER: "nvidia", OPENAI_MODEL: "nvidia/custom-model" }).OPENAI_MODEL).toBe("nvidia/custom-model");
+  });
+
   it("requires a usable reasoning key in production", () => {
     expect(() => loadConfig({ NODE_ENV: "production" })).toThrow(/OPENAI_API_KEY/);
     expect(() => loadConfig({ NODE_ENV: "production", OPENAI_API_KEY: "prod-key" })).toThrow(/DATABASE_URL/);

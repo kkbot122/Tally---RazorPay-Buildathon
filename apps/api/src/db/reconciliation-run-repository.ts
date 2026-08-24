@@ -51,7 +51,7 @@ export type StartRunInput = {
 
 export interface ReconciliationRunRepository {
   startRun(input: StartRunInput): Promise<void>;
-  markRunFailed(runId: string, failureCode: string): Promise<void>;
+  markRunFailed(runId: string, failureCode: string, trace?: readonly PersistedTraceEvent[]): Promise<void>;
   saveCompletedRun(input: PersistCompletedRunInput): Promise<void>;
   getRunById(runId: string): Promise<typeof reconciliationRuns.$inferSelect | undefined>;
   getResultsForRun(runId: string): Promise<(typeof reconciliationResults.$inferSelect)[]>;
@@ -70,12 +70,26 @@ export function createReconciliationRunRepository(db: DatabaseClient): Reconcili
         modelMetadata: {},
       });
     },
-    async markRunFailed(runId, failureCode) {
-      await db.update(reconciliationRuns).set({
-        status: "FAILED",
-        completedAt: new Date(),
-        modelMetadata: { failureCode },
-      }).where(eq(reconciliationRuns.runId, runId));
+    async markRunFailed(runId, failureCode, trace = []) {
+      await db.transaction(async (tx) => {
+        if (trace.length > 0) {
+          await tx.insert(traceEvents).values(trace.map((event) => ({
+            eventId: event.eventId,
+            runId: event.runId,
+            sequenceNo: event.sequenceNo,
+            caseId: event.caseId,
+            type: event.type,
+            occurredAt: new Date(event.occurredAt),
+            message: event.message,
+            metadata: event.payload,
+          })));
+        }
+        await tx.update(reconciliationRuns).set({
+          status: "FAILED",
+          completedAt: new Date(),
+          modelMetadata: { failureCode },
+        }).where(eq(reconciliationRuns.runId, runId));
+      });
     },
     async saveCompletedRun(input) {
       validatePersistCompletedRunInput(input);

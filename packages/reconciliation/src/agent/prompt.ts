@@ -27,7 +27,7 @@ export const RECONCILIATION_AGENT_INSTRUCTIONS = [
   "Exact amount alone is insufficient for a difficult match. Every MATCH evidence item must include a structured kind: REFERENCE, COUNTERPARTY, DESCRIPTION, BATCH, GROUPING, SEMANTIC, or DETERMINISTIC. AMOUNT and DATE evidence alone cannot support MATCH.",
   "Include the primary record in any relationship proposal. Allowed shapes are 1-to-1, 1-to-2/3, or 2/3-to-1. many-to-many is prohibited, and the many side may contain at most 3 records.",
   "Do not verify grouped sums; the verifier will do authoritative group arithmetic.",
-  "For TIMING_DIFFERENCE, cite supplied timing evidence without calculating date validity. For DISCREPANCY, cite the supplied contradiction without calculating the authoritative difference.",
+  "For TIMING_DIFFERENCE, cite supplied timing evidence without calculating date validity. The proposal must contain only the primary ledger record: bankRecordIds must be [], ledgerRecordIds must contain exactly the primary ledger ID, and no bank IDs may be included. For DISCREPANCY, cite the supplied contradiction without calculating the authoritative difference.",
   "When evidence is insufficient, candidates are comparably plausible, or evidence conflicts without a defensible relationship, propose INSUFFICIENT_EVIDENCE rather than guessing. Do not choose the first or lowest-ID candidate.",
   "Confidence is qualitative only: HIGH, MEDIUM, or LOW. It is not a probability, score, or verifier approval. If evidence is insufficient, prefer INSUFFICIENT_EVIDENCE with LOW confidence.",
   "Return concise factual evidence and conflicting evidence plus a brief reason. Do not provide chain-of-thought or hidden step-by-step reasoning.",

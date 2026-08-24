@@ -12,6 +12,7 @@ import { z } from "zod";
 
 import type {
   PersistCompletedRunInput,
+  PersistedTraceEvent,
   ReconciliationRunRepository,
 } from "./db/reconciliation-run-repository.js";
 
@@ -70,6 +71,7 @@ export function createReconciliationRunService(
   modelAdapter: ReasoningModelAdapter,
   pipeline: typeof runReconciliation = runReconciliation,
   generateRunId: () => string = () => `run_${randomUUID()}`,
+  onVerificationFailure?: Parameters<typeof runReconciliation>[0]["onVerificationFailure"],
 ): ReconciliationRunService {
   return {
     async createRun(request) {
@@ -88,11 +90,19 @@ export function createReconciliationRunService(
           bankCsv: validatedRequest.bankCsv,
           ledgerCsv: validatedRequest.ledgerCsv,
           modelAdapter,
+          onVerificationFailure,
         });
-        await repository.saveCompletedRun(toPersistenceInput(validatedRequest.asOfDate, result));
+        try {
+          await repository.saveCompletedRun(toPersistenceInput(validatedRequest.asOfDate, result));
+        } catch (error) {
+          attachTrace(error, result.trace);
+          throw error;
+        }
       } catch (error) {
         try {
-          await repository.markRunFailed(runId, failureCode(error));
+          const trace = toPersistenceTrace(runId, error);
+          if (trace.length > 0) await repository.markRunFailed(runId, failureCode(error), trace);
+          else await repository.markRunFailed(runId, failureCode(error));
         } catch {
           // Preserve the original provider/pipeline/persistence failure.
         }
@@ -164,4 +174,29 @@ function toPersistenceInput(asOfDate: string, result: ReconciliationRunResult): 
       payload: event.payload,
     })),
   };
+}
+
+function toPersistenceTrace(runId: string, error: unknown): PersistedTraceEvent[] {
+  const trace = (error as { reconciliationTrace?: ReconciliationRunResult["trace"] }).reconciliationTrace;
+  if (!Array.isArray(trace)) return [];
+  return trace.map((event) => ({
+    eventId: event.eventId,
+    runId,
+    sequenceNo: event.sequenceNo,
+    caseId: event.caseId,
+    type: event.type,
+    occurredAt: event.occurredAt,
+    message: event.message,
+    payload: event.payload,
+  }));
+}
+
+function attachTrace(error: unknown, trace: ReconciliationRunResult["trace"]): void {
+  if (error !== null && typeof error === "object") {
+    Object.defineProperty(error, "reconciliationTrace", {
+      configurable: true,
+      enumerable: false,
+      value: trace,
+    });
+  }
 }

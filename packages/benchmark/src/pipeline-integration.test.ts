@@ -331,14 +331,16 @@ describe("T023 end-to-end reconciliation pipeline", () => {
         proposedOutcome: "MATCH",
       }),
     };
-    await expect(runReconciliation({
+    const result = await runReconciliation({
       runId: "run-invalid-match-001",
       asOfDate: fixture.asOfDate,
       bankCsv: fixture.bankCsv,
       ledgerCsv: fixture.ledgerCsv,
       modelAdapter: adapter,
       clock: () => new Date("2026-01-01T00:00:00.000Z"),
-    })).rejects.toMatchObject({ code: "AI_SCHEMA_ERROR" });
+    });
+    expect(result.results.some((item) => item.outcome === "RECONCILED" && item.source === "AGENT_VERIFIED")).toBe(false);
+    expect(result.trace.some((event) => event.type === "VERIFICATION_CHECKED" && (event.payload as { failures?: { code: string }[] }).failures?.some((failure) => failure.code === "AMOUNT_MISMATCH"))).toBe(true);
   });
 
   it("rejects parsing failures before producing a run result", async () => {

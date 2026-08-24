@@ -20,6 +20,12 @@ export type RunReconciliationInput = {
   reasoningConcurrency?: number;
   /** Test hook only; production runs use the recorder's default clock. */
   clock?: () => Date;
+  onVerificationFailure?: (event: {
+    caseId: string;
+    proposedBankRecordIds: string[];
+    proposedLedgerRecordIds: string[];
+    failureCodes: string[];
+  }) => void;
 };
 
 export type ReconciliationOperationalErrorCode = "AI_SCHEMA_ERROR";

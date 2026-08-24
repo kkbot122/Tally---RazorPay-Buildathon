@@ -2,6 +2,8 @@ import type { AgentProposal } from "@tally/contracts";
 
 export type ReasoningModelInput = {
   input: string;
+  /** Feedback from the authoritative verifier for a bounded repair attempt. */
+  retryFeedback?: string;
 };
 
 export interface ReasoningModelAdapter {

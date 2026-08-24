@@ -2,7 +2,7 @@ import OpenAI from "openai";
 import { zodTextFormat } from "openai/helpers/zod";
 import { ZodError } from "zod";
 
-import { AgentProposalForModelSchema, AgentProposalSchema, type AgentProposal } from "./proposal-schema.js";
+import { AgentProposalForModelSchema, type AgentProposal } from "./proposal-schema.js";
 import {
   ReasoningAdapterError,
   type ReasoningModelAdapter,
@@ -34,7 +34,7 @@ export class OpenAIResponsesAdapter implements ReasoningModelAdapter {
     try {
       response = await this.client.parse({
         model: this.model,
-        input: input.input,
+        input: input.retryFeedback === undefined ? input.input : `${input.input}\n\nVERIFIER FEEDBACK FOR THIS REPAIR ATTEMPT:\n${input.retryFeedback}`,
         text: {
           format: zodTextFormat(AgentProposalForModelSchema, "agent_proposal"),
         },
@@ -44,7 +44,7 @@ export class OpenAIResponsesAdapter implements ReasoningModelAdapter {
       throw new ReasoningAdapterError(code, code === "AI_SCHEMA_ERROR" ? "The model response failed schema validation." : "The OpenAI reasoning request failed.", { cause: error });
     }
 
-    const parsed = AgentProposalSchema.safeParse(response.output_parsed);
+    const parsed = AgentProposalForModelSchema.safeParse(response.output_parsed);
     if (!parsed.success) {
       throw new ReasoningAdapterError("AI_SCHEMA_ERROR", "The OpenAI response did not contain a valid agent proposal.", { cause: parsed.error });
     }

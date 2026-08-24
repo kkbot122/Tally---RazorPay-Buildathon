@@ -13,10 +13,15 @@ export const EnvSchema = z.object({
   TALLY_E2E_DETERMINISTIC_ADAPTER: z.enum(["true", "false"]).optional(),
 });
 
+export const DEFAULT_NVIDIA_MODEL = "nvidia/nemotron-3.5-lightning-30b-a3b";
+
 export type AppConfig = z.infer<typeof EnvSchema>;
 
 export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppConfig {
-  const config = EnvSchema.parse(environment);
+  const parsed = EnvSchema.parse(environment);
+  const config = parsed.AI_PROVIDER === "nvidia" && parsed.OPENAI_MODEL === "gpt-5.6-terra"
+    ? { ...parsed, OPENAI_MODEL: DEFAULT_NVIDIA_MODEL }
+    : parsed;
   if (config.NODE_ENV === "production") {
     if (config.OPENAI_API_KEY.trim().length === 0) throw new Error("OPENAI_API_KEY is required in production");
     if (config.DATABASE_URL === "postgresql://localhost:5432/tally") throw new Error("DATABASE_URL is required in production");

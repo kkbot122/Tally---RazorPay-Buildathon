@@ -7,7 +7,7 @@ import type { ParsedBankTransaction, ParsedLedgerTransaction } from "../parsing/
 import { verifyMatchProposal } from "../verifier/index.js";
 import { runReconciliation } from "./run-reconciliation.js";
 import { ReconciliationOperationalError } from "./types.js";
-import type { ReasoningModelAdapter } from "../agent/index.js";
+import { ReasoningAdapterError, type ReasoningModelAdapter } from "../agent/index.js";
 
 const LEDGER_HEADERS = "ledger_txn_id,accounting_date,maturity_date,amount,currency,direction,reference,counterparty,description,source,batch_id";
 
@@ -119,11 +119,12 @@ function matchProposal(bankRecordIds: string[], ledgerRecordIds: string[], evide
 
 describe("T034 core engine safety invariants", () => {
   it("rejects reconciliation when currencies differ", async () => {
-    await expect(runCase(
+    const result = await runCase(
       [{ id: "B1", currency: "INR" }],
       [{ id: "L1", currency: "USD" }],
       adapter((id) => proposalFor(id, ["L1"])),
-    )).rejects.toMatchObject({ code: "AI_SCHEMA_ERROR" });
+    );
+    expect(result.results.find((item) => item.caseId === "BANK:B1")).toMatchObject({ outcome: "UNRESOLVED", reasonCode: "VERIFICATION_FAILED" });
   });
 
   it("never auto-reconciles when amounts differ", async () => {
@@ -146,12 +147,40 @@ describe("T034 core engine safety invariants", () => {
     expect(result.results.filter((item) => item.outcome === "RECONCILED").flatMap((item) => item.ledgerRecordIds)).toEqual(["L1"]);
   });
 
+  it("retries a verifier-rejected relationship with exact failure feedback", async () => {
+    let calls = 0;
+    const result = await runCase(
+      [{ id: "B1", counterparty: "Bank Only" }],
+      [{ id: "L1", reference: "LEDGER-ONLY", counterparty: "Ledger Only" }],
+      { generateProposal: async ({ retryFeedback }) => {
+        calls += 1;
+        if (retryFeedback === undefined) return proposalFor("B404", ["L1"]);
+        expect(retryFeedback).toContain("UNKNOWN_RECORD");
+        return proposalFor("B1", ["L1"]);
+      } },
+    );
+    expect(calls).toBe(4);
+    expect(result.results.find((item) => item.caseId === "BANK:B1")).toMatchObject({ outcome: "RECONCILED" });
+  });
+
+  it("isolates exhausted model schema failures as unresolved cases", async () => {
+    const result = await runCase(
+      [{ id: "B1", reference: "BANK-ONLY", counterparty: "Bank Only" }],
+      [{ id: "L1", reference: "LEDGER-ONLY", counterparty: "Ledger Only" }],
+      { generateProposal: async () => { throw new ReasoningAdapterError("AI_SCHEMA_ERROR", "malformed model output"); } },
+    );
+    expect(result.results.find((item) => item.caseId === "BANK:B1")).toMatchObject({ outcome: "UNRESOLVED" });
+    expect(result.trace.at(-1)?.type).toBe("RUN_COMPLETED");
+  });
+
   it("prevents a later AI proposal from reusing a record committed by a deterministic rule", async () => {
-    await expect(runCase(
+    const result = await runCase(
       [{ id: "B1", reference: "REF-1", counterparty: "Acme" }, { id: "B2", reference: "OTHER-REF", counterparty: "Other" }],
       [{ id: "L1", reference: "REF-1", counterparty: "Acme" }],
       adapter((id) => proposalFor(id, ["L1"])),
-    )).rejects.toMatchObject({ code: "AI_SCHEMA_ERROR" });
+    );
+    expect(result.results.some((item) => item.outcome === "RECONCILED")).toBe(true);
+    expect(result.results.some((item) => item.caseId === "BANK:B2" && item.outcome === "UNRESOLVED")).toBe(true);
   });
 
   it("rejects candidate groups larger than three records", () => {
@@ -176,11 +205,12 @@ describe("T034 core engine safety invariants", () => {
   });
 
   it("rejects AI proposals containing unknown record IDs", async () => {
-    await expect(runCase(
+    const result = await runCase(
       [{ id: "B1", reference: "BANK-ONLY", counterparty: "Bank Counterparty" }],
       [{ id: "L1", reference: "LEDGER-ONLY", counterparty: "Ledger Counterparty" }],
       adapter((id) => proposalFor(id, ["L404"])),
-    )).rejects.toMatchObject({ name: "ReconciliationOperationalError", code: "AI_SCHEMA_ERROR" });
+    );
+    expect(result.results.find((item) => item.caseId === "BANK:B1")).toMatchObject({ outcome: "UNRESOLVED", reasonCode: "VERIFICATION_FAILED" });
   });
 
   it("rejects semantic matches supported only by equal amount in the full AMOUNT_AND_DATE pipeline path", async () => {
