@@ -18,8 +18,8 @@ const ledger = (overrides: Partial<ParsedLedgerTransaction> = {}): ParsedLedgerT
   description: "Receipt", source: "ERP", batchId: null, ...overrides,
 });
 
-const supportingEvidence = { statement: "The supplied records contain relevant evidence.", source: "CROSS_RECORD" as const, recordIds: ["B1", "L1"] };
-const conflictingEvidence = { statement: "The supplied records contain contradictory evidence.", source: "CROSS_RECORD" as const, recordIds: ["B1", "L1"] };
+const supportingEvidence = { statement: "The supplied records contain relevant evidence.", source: "CROSS_RECORD" as const, kind: null, recordIds: ["B1", "L1"] };
+const conflictingEvidence = { statement: "The supplied records contain contradictory evidence.", source: "CROSS_RECORD" as const, kind: null, recordIds: ["B1", "L1"] };
 
 function proposal(outcome: AgentProposal["proposedOutcome"], bankRecordIds: string[], ledgerRecordIds: string[], overrides: Partial<AgentProposal> = {}): AgentProposal {
   return {

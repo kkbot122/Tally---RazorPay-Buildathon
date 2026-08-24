@@ -2,7 +2,7 @@ import OpenAI from "openai";
 import { zodTextFormat } from "openai/helpers/zod";
 import { ZodError } from "zod";
 
-import { AgentProposalSchema, type AgentProposal } from "./proposal-schema.js";
+import { AgentProposalForModelSchema, AgentProposalSchema, type AgentProposal } from "./proposal-schema.js";
 import {
   ReasoningAdapterError,
   type ReasoningModelAdapter,
@@ -35,7 +35,7 @@ export class OpenAIResponsesAdapter implements ReasoningModelAdapter {
         model: this.model,
         input: input.input,
         text: {
-          format: zodTextFormat(AgentProposalSchema, "agent_proposal"),
+          format: zodTextFormat(AgentProposalForModelSchema, "agent_proposal"),
         },
       });
     } catch (error) {

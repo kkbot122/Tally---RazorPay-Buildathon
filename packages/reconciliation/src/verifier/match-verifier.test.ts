@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { AgentProposal } from "@tally/contracts";
 
 import { createRecordLookup, emptyUsedRecordState } from "../compatibility/index.js";
-import type { CandidateSet } from "../candidates/index.js";
+import { generateCandidates, type CandidateSet } from "../candidates/index.js";
 import type { ParsedBankTransaction, ParsedLedgerTransaction } from "../parsing/types.js";
 import { verifyMatchProposal } from "./match-verifier.js";
 
@@ -18,7 +18,7 @@ const ledger = (overrides: Partial<ParsedLedgerTransaction> = {}): ParsedLedgerT
   description: "Receipt", source: "ERP", batchId: null, ...overrides,
 });
 
-const evidence = { statement: "The supplied records identify the same payment.", source: "CROSS_RECORD" as const, recordIds: ["B1", "L1"] };
+const evidence = { statement: "The supplied records identify the same payment.", source: "CROSS_RECORD" as const, kind: "SEMANTIC" as const, recordIds: ["B1", "L1"] };
 
 function proposal(bankRecordIds: string[], ledgerRecordIds: string[], overrides: Partial<AgentProposal> = {}): AgentProposal {
   return {
@@ -26,7 +26,7 @@ function proposal(bankRecordIds: string[], ledgerRecordIds: string[], overrides:
     bankRecordIds,
     ledgerRecordIds,
     confidence: "HIGH",
-    evidence: [evidence],
+    evidence: [{ ...evidence, recordIds: [...bankRecordIds, ...ledgerRecordIds] }],
     conflictingEvidence: [],
     reason: "The supplied evidence supports the relationship.",
     ...overrides,
@@ -80,7 +80,28 @@ function hasFailure(result: ReturnType<typeof verifyMatchProposal>, code: string
 
 describe("verifyMatchProposal", () => {
   it("verifies a semantic 1↔1 match without requiring mechanical reference equality", () => {
-    expect(verify([bank()], [ledger()], proposal(["B1"], ["L1"]))).toEqual({
+    const banks = [bank()];
+    const ledgers = [ledger()];
+    const records = createRecordLookup(banks, ledgers);
+    const primary = { side: "BANK" as const, recordId: "B1" };
+    const generatedCandidates = generateCandidates({
+      primary,
+      records,
+      usedRecords: emptyUsedRecordState(),
+    });
+    expect(generatedCandidates.candidates[0]?.facts).toMatchObject({
+      rawReferenceEqual: false,
+      normalizedReferenceEqual: false,
+      normalizedCounterpartyEqual: false,
+      batchIdEqual: false,
+    });
+    expect(verifyMatchProposal({
+      proposal: proposal(["B1"], ["L1"]),
+      primary,
+      candidateSet: generatedCandidates,
+      records,
+      usedRecords: emptyUsedRecordState(),
+    })).toEqual({
       status: "VERIFIED", bankRecordIds: ["B1"], ledgerRecordIds: ["L1"],
     });
   });
@@ -126,6 +147,16 @@ describe("verifyMatchProposal", () => {
     expect(hasFailure(verify([bank()], [ledger()], proposal(["B1"], ["L1"], { evidence: [] }), { side: "BANK", recordId: "B1" }), "INSUFFICIENT_EVIDENCE")).toBe(true);
     expect(hasFailure(verify([bank()], [ledger()], proposal(["B1"], ["L1"], { evidence: [{ ...evidence, statement: "   " }] }), { side: "BANK", recordId: "B1" }), "INSUFFICIENT_EVIDENCE")).toBe(true);
     expect(hasFailure(verify([bank()], [ledger()], proposal(["B1"], ["L1"], { conflictingEvidence: [evidence] })), "CONFLICTING_EVIDENCE")).toBe(true);
+  });
+
+  it("does not combine one-sided semantic and amount evidence", () => {
+    const result = verify([bank()], [ledger()], proposal(["B1"], ["L1"], {
+      evidence: [
+        { ...evidence, recordIds: ["B1"] },
+        { statement: "The amounts agree.", source: "CROSS_RECORD", kind: "AMOUNT", recordIds: ["L1"] },
+      ],
+    }));
+    expect(hasFailure(result, "INSUFFICIENT_EVIDENCE")).toBe(true);
   });
 
   it("does not use confidence, reason, or the deterministic date window as hard match rules", () => {

@@ -64,11 +64,16 @@ export const AgentProposedOutcomeSchema = z.enum([
 
 export const AgentConfidenceSchema = z.enum(["HIGH", "MEDIUM", "LOW"]);
 
+export const AgentEvidenceKindSchema = z.enum(["AMOUNT", "REFERENCE", "COUNTERPARTY", "DESCRIPTION", "BATCH", "DATE", "GROUPING", "SEMANTIC", "DETERMINISTIC"]);
+
 export const AgentEvidenceSchema = z.object({
   statement: nonEmptyText,
   source: z.enum(["BANK_RECORD", "LEDGER_RECORD", "CROSS_RECORD", "DETERMINISTIC"]),
+  kind: AgentEvidenceKindSchema.nullable().optional(),
   recordIds: z.array(id).min(1),
 });
+
+export const AgentEvidenceForModelSchema = AgentEvidenceSchema.extend({ kind: AgentEvidenceKindSchema });
 
 export const AgentProposalSchema = z.object({
   proposedOutcome: AgentProposedOutcomeSchema,
@@ -78,6 +83,11 @@ export const AgentProposalSchema = z.object({
   evidence: z.array(AgentEvidenceSchema).min(1),
   conflictingEvidence: z.array(AgentEvidenceSchema),
   reason: nonEmptyText,
+});
+
+export const AgentProposalForModelSchema = AgentProposalSchema.extend({
+  evidence: z.array(AgentEvidenceForModelSchema).min(1),
+  conflictingEvidence: z.array(AgentEvidenceForModelSchema),
 });
 
 export const VerificationResultSchema = z.object({

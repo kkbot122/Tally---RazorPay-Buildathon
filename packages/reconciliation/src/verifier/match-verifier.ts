@@ -50,6 +50,9 @@ export function verifyMatchProposal(input: VerifyMatchProposalInput): MatchVerif
   if (!hasNonEmptyEvidence(proposal)) {
     failures.push({ code: "INSUFFICIENT_EVIDENCE", message: "A MATCH proposal requires non-empty supporting evidence." });
   }
+  if (!hasStructuredNonAmountEvidence(proposal, primary, candidateSet)) {
+    failures.push({ code: "INSUFFICIENT_EVIDENCE", message: "A difficult MATCH proposal requires supplied evidence beyond amount equality." });
+  }
   if (proposal.conflictingEvidence.length > 0) {
     failures.push({ code: "CONFLICTING_EVIDENCE", message: "A MATCH proposal cannot contain conflicting evidence." });
   }
@@ -117,6 +120,23 @@ function isAllowedShape(bankCount: number, ledgerCount: number): boolean {
 
 function hasNonEmptyEvidence(proposal: AgentProposal): boolean {
   return proposal.evidence.some((evidence) => evidence.statement.trim().length > 0);
+}
+
+function hasStructuredNonAmountEvidence(
+  proposal: AgentProposal,
+  primary: CandidatePrimary,
+  candidateSet: CandidateSet,
+): boolean {
+  const nonAmountKinds = new Set(["REFERENCE", "COUNTERPARTY", "DESCRIPTION", "BATCH", "GROUPING", "SEMANTIC", "DETERMINISTIC"]);
+  const proposedRecordIds = [...proposal.bankRecordIds, ...proposal.ledgerRecordIds];
+  const candidateRecordIds = new Set(candidateSet.candidates.map((candidate) => candidate.recordId));
+  return proposal.evidence.some((evidence) =>
+    evidence.kind !== undefined && evidence.kind !== null
+      && nonAmountKinds.has(evidence.kind)
+      && evidence.source === "CROSS_RECORD"
+      && proposedRecordIds.every((recordId) => evidence.recordIds.includes(recordId))
+      && proposedRecordIds.every((recordId) => recordId === primary.recordId || candidateRecordIds.has(recordId)),
+  );
 }
 
 function rejected(...failures: MatchVerificationFailure[]): MatchVerificationResult {

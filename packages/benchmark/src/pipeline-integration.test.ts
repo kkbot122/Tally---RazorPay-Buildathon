@@ -16,6 +16,7 @@ function proposalFor(benchmarkCase: BenchmarkCase): AgentProposal {
   const evidence = [{
     statement: "The supplied records provide the configured fixture evidence.",
     source: "CROSS_RECORD" as const,
+    kind: "SEMANTIC" as const,
     recordIds: [...bankRecordIds, ...ledgerRecordIds].length > 0 ? [...bankRecordIds, ...ledgerRecordIds] : [benchmarkCase.ledgerTransactions[0]?.ledgerTxnId ?? benchmarkCase.bankTransactions[0]!.bankTxnId],
   }];
 
@@ -293,7 +294,7 @@ describe("T023 end-to-end reconciliation pipeline", () => {
           bankRecordIds: [primary[1]!],
           ledgerRecordIds: ["L1"],
           confidence: "HIGH",
-          evidence: [{ statement: "Same amount and counterparty.", source: "CROSS_RECORD", recordIds: [primary[1]!, "L1"] }],
+          evidence: [{ statement: "Same amount and counterparty.", source: "CROSS_RECORD", kind: "COUNTERPARTY", recordIds: [primary[1]!, "L1"] }],
           conflictingEvidence: [],
           reason: "Configured overlap test proposal.",
         };
@@ -375,7 +376,7 @@ describe("T023 end-to-end reconciliation pipeline", () => {
           bankRecordIds: [bankId],
           ledgerRecordIds: ["L1"],
           confidence: "HIGH",
-          evidence: [{ statement: "Configured overlap evidence.", source: "CROSS_RECORD", recordIds: [bankId, "L1"] }],
+          evidence: [{ statement: "Configured overlap evidence.", source: "CROSS_RECORD", kind: "SEMANTIC", recordIds: [bankId, "L1"] }],
           conflictingEvidence: [],
           reason: "Configured completion-order test proposal.",
         };
@@ -401,10 +402,10 @@ describe("T023 end-to-end reconciliation pipeline", () => {
   it("skips a later-wave primary consumed by an earlier wave", async () => {
     const bankCsv = [
       BANK_HEADERS.join(","),
-      "B1,2026-08-11,2026-08-11,100.00,INR,CREDIT,,Alpha,,",
+      "B1,2026-08-11,2026-08-11,100.00,INR,CREDIT,,Alpha,,GROUP-1",
       "B2,2026-08-11,2026-08-11,100.00,INR,CREDIT,,Beta,,",
     ].join("\n");
-    const ledgerCsv = [LEDGER_HEADERS.join(","), "L1,2026-08-10,,100.00,INR,CREDIT,,Gamma,,ERP,"].join("\n");
+    const ledgerCsv = [LEDGER_HEADERS.join(","), "L1,2026-08-10,,100.00,INR,CREDIT,,Gamma,,ERP,GROUP-1"].join("\n");
     const calls: string[] = [];
     const adapter: ReasoningModelAdapter = {
       generateProposal: async ({ input }) => {
@@ -418,7 +419,7 @@ describe("T023 end-to-end reconciliation pipeline", () => {
               bankRecordIds: ["B1"],
               ledgerRecordIds: ["L1"],
               confidence: "HIGH",
-              evidence: [{ statement: "Configured reuse evidence.", source: "CROSS_RECORD", recordIds: ["B1", "L1"] }],
+              evidence: [{ statement: "Configured reuse evidence.", source: "CROSS_RECORD", kind: "SEMANTIC", recordIds: ["B1", "L1"] }],
               conflictingEvidence: [],
               reason: "Configured later-wave test proposal.",
             };

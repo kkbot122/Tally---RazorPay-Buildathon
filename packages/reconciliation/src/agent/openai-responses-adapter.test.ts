@@ -9,7 +9,7 @@ const proposal = {
   bankRecordIds: ["B001"],
   ledgerRecordIds: ["L001"],
   confidence: "HIGH",
-  evidence: [{ statement: "The references agree.", source: "CROSS_RECORD", recordIds: ["B001", "L001"] }],
+  evidence: [{ statement: "The references agree.", source: "CROSS_RECORD", kind: "REFERENCE", recordIds: ["B001", "L001"] }],
   conflictingEvidence: [],
   reason: "The supplied records describe the same event.",
 } as const;

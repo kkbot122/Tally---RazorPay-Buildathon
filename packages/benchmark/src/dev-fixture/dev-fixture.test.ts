@@ -442,6 +442,7 @@ describe("20-case development fixture", () => {
     const evidenceFor = (bankRecordId: string, ledgerRecordIds: string[]) => [{
       statement: "The supplied records contain related transaction evidence.",
       source: "CROSS_RECORD" as const,
+      kind: "SEMANTIC" as const,
       recordIds: [bankRecordId, ...ledgerRecordIds],
     }];
     const candidateSetFor = (benchmarkCase: (typeof fixture.cases)[number]) => generateCandidates({

@@ -276,6 +276,7 @@ function proposalFor(benchmarkCase: BenchmarkCase): AgentProposal {
   const evidence = [{
     statement: "The supplied records provide the configured fixture evidence.",
     source: "CROSS_RECORD" as const,
+    kind: "SEMANTIC" as const,
     recordIds: recordIds.length > 0 ? recordIds : [benchmarkCase.ledgerTransactions[0]?.ledgerTxnId ?? benchmarkCase.bankTransactions[0]!.bankTxnId],
   }];
   if (benchmarkCase.expectedOutcome === "RECONCILED") return { proposedOutcome: "MATCH", bankRecordIds, ledgerRecordIds, confidence: "HIGH", evidence, conflictingEvidence: [], reason: "The supplied evidence supports the configured relationship." };

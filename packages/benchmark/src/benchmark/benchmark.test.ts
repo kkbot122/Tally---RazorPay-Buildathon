@@ -107,7 +107,7 @@ describe("frozen 100-case benchmark", () => {
       bankRecordIds: [bankRecordId],
       ledgerRecordIds: [ledgerId],
       confidence: "HIGH" as const,
-      evidence: [{ statement: "The records support the same payment.", source: "CROSS_RECORD" as const, recordIds: [bankRecordId, ledgerId] }],
+      evidence: [{ statement: "The records support the same payment.", source: "CROSS_RECORD" as const, kind: "SEMANTIC" as const, recordIds: [bankRecordId, ledgerId] }],
       conflictingEvidence: [],
       reason: "The records support the same payment.",
     });

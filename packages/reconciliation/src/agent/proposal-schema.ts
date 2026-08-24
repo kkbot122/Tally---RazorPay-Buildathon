@@ -1,2 +1,2 @@
-export { AgentProposalSchema } from "@tally/contracts";
+export { AgentProposalForModelSchema, AgentProposalSchema } from "@tally/contracts";
 export type { AgentProposal } from "@tally/contracts";

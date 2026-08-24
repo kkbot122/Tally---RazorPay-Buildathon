@@ -64,6 +64,7 @@ describe("agent contracts", () => {
       {
         statement: "The references are equivalent.",
         source: "CROSS_RECORD",
+        kind: "REFERENCE",
         recordIds: ["bank_001", "ledger_001"],
       },
     ],

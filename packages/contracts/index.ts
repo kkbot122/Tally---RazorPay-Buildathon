@@ -1,7 +1,10 @@
 export {
   AgentConfidenceSchema,
   AgentEvidenceSchema,
+  AgentEvidenceForModelSchema,
+  AgentEvidenceKindSchema,
   AgentProposalSchema,
+  AgentProposalForModelSchema,
   AgentProposedOutcomeSchema,
   BankTransactionSchema,
   FinalOutcomeSchema,
