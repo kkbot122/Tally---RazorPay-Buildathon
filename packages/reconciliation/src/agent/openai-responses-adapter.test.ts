@@ -100,6 +100,7 @@ describe("NvidiaChatCompletionsAdapter", () => {
     await adapter.generateProposal({ input: "input" });
     const request = create.mock.calls[0]![0] as Record<string, unknown>;
     expect(request.reasoning_effort).toBeUndefined();
-    expect(request.extra_body).toEqual({ chat_template_kwargs: { enable_thinking: false } });
+    expect(request.extra_body).toBeUndefined();
+    expect(request.chat_template_kwargs).toEqual({ enable_thinking: false });
   });
 });

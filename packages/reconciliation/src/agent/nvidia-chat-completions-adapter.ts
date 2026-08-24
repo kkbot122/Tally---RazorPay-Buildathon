@@ -53,7 +53,7 @@ export class NvidiaChatCompletionsAdapter implements ReasoningModelAdapter {
         temperature: 0,
         max_tokens: 16384,
         ...(this.model.startsWith("nvidia/nemotron-3.5-lightning")
-          ? { extra_body: { chat_template_kwargs: { enable_thinking: this.reasoningEffort !== "none" } } }
+          ? { chat_template_kwargs: { enable_thinking: this.reasoningEffort !== "none" } }
           : { reasoning_effort: this.reasoningEffort }),
       };
       // NVIDIA's provider-specific chat_template_kwargs is intentionally outside
