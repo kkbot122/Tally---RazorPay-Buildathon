@@ -47,6 +47,8 @@ A visual execution trace showing the real path a case took through normalization
 
 Engineering and research documentation covering problem narrowing, real reconciliation workflows, benchmark design, architecture, experiments, failures, and final results.
 
+See [DESIGN.md](DESIGN.md) for the frontend design system and route-level UI constraints.
+
 ## Tech stack
 
 * **Frontend:** Next.js, React, Tailwind CSS, shadcn/ui, React Flow, Motion, Recharts, MDX
