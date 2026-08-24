@@ -1,4 +1,4 @@
-import type { AgentEvidence, FinalOutcome, ReasonCode } from "@tally/contracts";
+import type { AgentEvidence, FinalOutcome, ReasonCode, TraceEvent } from "@tally/contracts";
 
 export type CreateRunInput = { asOfDate: string; bankCsv: string; ledgerCsv: string };
 export type CreatedRun = { runId: string; status: "COMPLETED" };
@@ -52,4 +52,8 @@ export function getRun(runId: string): Promise<RunSummary> {
 
 export function getRunResults(runId: string): Promise<RunResult[]> {
   return request<RunResult[]>(`/api/runs/${encodeURIComponent(runId)}/results`);
+}
+
+export function getRunTrace(runId: string): Promise<TraceEvent[]> {
+  return request<TraceEvent[]>(`/api/runs/${encodeURIComponent(runId)}/trace`);
 }

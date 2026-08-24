@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createRun, getRun, getRunResults } from "./runs";
+import { createRun, getRun, getRunResults, getRunTrace } from "./runs";
 
 describe("runtime run API client", () => {
   afterEach(() => vi.unstubAllGlobals());
@@ -25,5 +25,15 @@ describe("runtime run API client", () => {
 
     expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual(["/api/runs/run_001", "/api/runs/run_001/results"]);
     expect(fetchMock.mock.calls.every(([input]) => !String(input).includes("evaluate"))).toBe(true);
+  });
+
+  it("reads the persisted trace endpoint without loading results", async () => {
+    const fetchMock = vi.fn<(input: string, init?: RequestInit) => Promise<Response>>(async () => new Response(JSON.stringify([]), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getRunTrace("run-test");
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/runs/run-test/trace", expect.anything());
+    expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual(["/api/runs/run-test/trace"]);
   });
 });

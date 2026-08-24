@@ -179,7 +179,7 @@ export default function Dashboard() {
             <h1 className="mb-[5px] mt-1 text-2xl font-semibold leading-[30px] tracking-[-.025em]">Reconciliation control room</h1>
             <p className="m-0 max-w-[620px] text-tally-ink-secondary">Run a bank-to-books reconciliation and inspect the persisted operational outcomes that need attention.</p>
           </div>
-          {summary !== null && <div className="mb-3 flex items-center justify-between gap-4"><span className="font-tally-mono text-xs">{summary.runId}</span><StatusBadge className={statusStyles(summary.status)}>{summary.status}</StatusBadge></div>}
+          {summary !== null && <div className="mb-3 flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-3"><span className="font-tally-mono text-xs">{summary.runId}</span><StatusBadge className={statusStyles(summary.status)}>{summary.status}</StatusBadge></div>{activeRunId !== null && <a className="text-xs font-semibold text-tally-accent underline-offset-2 hover:underline" href={`/trace?runId=${encodeURIComponent(activeRunId)}`}>View trace</a>}</div>}
         </div>
 
         <form className={`${surface} mb-6 p-5`} onSubmit={runReconciliation}>
