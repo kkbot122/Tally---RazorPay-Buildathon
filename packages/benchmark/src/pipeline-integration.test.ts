@@ -1,4 +1,5 @@
 import {
+  DEFAULT_REASONING_CONCURRENCY,
   runReconciliation,
   type AgentProposal,
   type ReasoningModelAdapter,
@@ -6,6 +7,7 @@ import {
 import { describe, expect, it } from "vitest";
 
 import { buildDevFixture } from "./dev-fixture/index.js";
+import { BANK_HEADERS, LEDGER_HEADERS } from "./dev-fixture/types.js";
 import type { BenchmarkCase } from "./generator/index.js";
 
 function proposalFor(benchmarkCase: BenchmarkCase): AgentProposal {
@@ -71,8 +73,10 @@ function proposalFor(benchmarkCase: BenchmarkCase): AgentProposal {
 
 class FixtureAdapter implements ReasoningModelAdapter {
   readonly calls: string[] = [];
+  activeCalls = 0;
+  maxActiveCalls = 0;
 
-  constructor(private readonly cases: readonly BenchmarkCase[]) {}
+  constructor(private readonly cases: readonly BenchmarkCase[], private readonly barrier?: ReleaseBarrier) {}
 
   async generateProposal(input: { input: string }): Promise<AgentProposal> {
     const primary = input.input.match(/"primary":\{"side":"(BANK|LEDGER)","record":\{(?:"bankTxnId"|"ledgerTxnId"):\"([^\"]+)\"/);
@@ -83,13 +87,40 @@ class FixtureAdapter implements ReasoningModelAdapter {
       || candidate.ledgerTransactions.some((record) => record.ledgerTxnId === primaryId));
     if (benchmarkCase === undefined) throw new Error(`no fixture case for ${primaryId}`);
     this.calls.push(primaryId);
-    return proposalFor(benchmarkCase);
+    this.activeCalls += 1;
+    this.maxActiveCalls = Math.max(this.maxActiveCalls, this.activeCalls);
+    this.barrier?.started();
+    try {
+      if (this.barrier !== undefined) await this.barrier.wait;
+      return proposalFor(benchmarkCase);
+    } finally {
+      this.activeCalls -= 1;
+    }
   }
+}
+
+type ReleaseBarrier = {
+  wait: Promise<void>;
+  started: () => void;
+};
+
+function releaseAfter(target: number): ReleaseBarrier {
+  let resolve!: () => void;
+  let startedCount = 0;
+  const wait = new Promise<void>((resolveWait) => { resolve = resolveWait; });
+  return {
+    wait,
+    started: () => {
+      startedCount += 1;
+      if (startedCount >= target) resolve();
+    },
+  };
 }
 
 describe("T023 end-to-end reconciliation pipeline", () => {
   it("runs the full dev fixture through deterministic and injected reasoning stages", async () => {
     const fixture = buildDevFixture();
+    expect(DEFAULT_REASONING_CONCURRENCY).toBe(5);
     const adapter = new FixtureAdapter(fixture.cases);
     const result = await runReconciliation({
       runId: "run-dev-001",
@@ -97,6 +128,7 @@ describe("T023 end-to-end reconciliation pipeline", () => {
       bankCsv: fixture.bankCsv,
       ledgerCsv: fixture.ledgerCsv,
       modelAdapter: adapter,
+      reasoningConcurrency: DEFAULT_REASONING_CONCURRENCY,
       clock: () => new Date("2026-01-01T00:00:00.000Z"),
     });
 
@@ -149,6 +181,7 @@ describe("T023 end-to-end reconciliation pipeline", () => {
       expect(events.map((event) => event.type)).toEqual(expect.arrayContaining([
         "CASE_STARTED", "CANDIDATES_GENERATED", "AGENT_STARTED", "AGENT_PROPOSED", "VERIFICATION_CHECKED", "CASE_FINALIZED",
       ]));
+      expectReasoningTraceOrder(events);
     }
 
     const strongContext = fixture.cases.find((item) => item.category === "STRONG_CONTEXT")!;
@@ -178,6 +211,107 @@ describe("T023 end-to-end reconciliation pipeline", () => {
     expect(second.results).toEqual(first.results);
     expect(second.trace).toEqual(first.trace);
     expect(second.usedRecords).toEqual(first.usedRecords);
+  });
+
+  it("bounds active model calls and proves concurrency is real", async () => {
+    const fixture = buildDevFixture();
+    const adapter = new FixtureAdapter(fixture.cases, releaseAfter(3));
+    await runReconciliation({
+      runId: "run-concurrency-3",
+      asOfDate: fixture.asOfDate,
+      bankCsv: fixture.bankCsv,
+      ledgerCsv: fixture.ledgerCsv,
+      modelAdapter: adapter,
+      reasoningConcurrency: 3,
+      clock: () => new Date("2026-01-01T00:00:00.000Z"),
+    });
+    expect(adapter.maxActiveCalls).toBe(3);
+  });
+
+  it("keeps concurrency one sequential and rejects invalid limits", async () => {
+    const fixture = buildDevFixture();
+    const adapter = new FixtureAdapter(fixture.cases, releaseAfter(1));
+    const result = await runReconciliation({
+      runId: "run-concurrency-1",
+      asOfDate: fixture.asOfDate,
+      bankCsv: fixture.bankCsv,
+      ledgerCsv: fixture.ledgerCsv,
+      modelAdapter: adapter,
+      reasoningConcurrency: 1,
+      clock: () => new Date("2026-01-01T00:00:00.000Z"),
+    });
+    expect(adapter.maxActiveCalls).toBe(1);
+    expect(result.results).toHaveLength(20);
+
+    for (const invalid of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      const invalidAdapter = new FixtureAdapter(fixture.cases);
+      await expect(runReconciliation({
+        runId: `run-invalid-concurrency-${String(invalid)}`,
+        asOfDate: fixture.asOfDate,
+        bankCsv: fixture.bankCsv,
+        ledgerCsv: fixture.ledgerCsv,
+        modelAdapter: invalidAdapter,
+        reasoningConcurrency: invalid,
+      })).rejects.toThrow(/reasoningConcurrency/);
+      expect(invalidAdapter.calls).toEqual([]);
+    }
+  });
+
+  it("keeps financial results equivalent between concurrency one and three", async () => {
+    const fixture = buildDevFixture();
+    const input = (reasoningConcurrency: number) => ({
+      runId: `run-equivalence-${reasoningConcurrency}`,
+      asOfDate: fixture.asOfDate,
+      bankCsv: fixture.bankCsv,
+      ledgerCsv: fixture.ledgerCsv,
+      modelAdapter: new FixtureAdapter(fixture.cases),
+      reasoningConcurrency,
+      clock: () => new Date("2026-01-01T00:00:00.000Z"),
+    });
+    const sequential = await runReconciliation(input(1));
+    const concurrent = await runReconciliation(input(3));
+    const normalize = (run: typeof sequential) => run.results.map(({ caseId, outcome, reasonCode, bankRecordIds, ledgerRecordIds }) => ({ caseId, outcome, reasonCode, bankRecordIds, ledgerRecordIds }));
+    expect(normalize(concurrent)).toEqual(normalize(sequential));
+  });
+
+  it("serializes overlapping same-wave verification against live usage", async () => {
+    const bankCsv = [
+      BANK_HEADERS.join(","),
+      "B1,2026-08-11,2026-08-11,100.00,INR,CREDIT,,Same,,",
+      "B2,2026-08-11,2026-08-11,100.00,INR,CREDIT,,Same,,",
+    ].join("\n");
+    const ledgerCsv = [
+      LEDGER_HEADERS.join(","),
+      "L1,2026-08-10,,100.00,INR,CREDIT,,Same,,ERP,",
+    ].join("\n");
+    const adapter: ReasoningModelAdapter = {
+      generateProposal: async ({ input }) => {
+        const primary = input.match(/"primary":\{"side":"BANK","record":\{"bankTxnId":"([^"]+)"/);
+        if (primary === null) throw new Error("missing primary");
+        return {
+          proposedOutcome: "MATCH",
+          bankRecordIds: [primary[1]!],
+          ledgerRecordIds: ["L1"],
+          confidence: "HIGH",
+          evidence: [{ statement: "Same amount and counterparty.", source: "CROSS_RECORD", recordIds: [primary[1]!, "L1"] }],
+          conflictingEvidence: [],
+          reason: "Configured overlap test proposal.",
+        };
+      },
+    };
+    const result = await runReconciliation({
+      runId: "run-overlap-001",
+      asOfDate: "2026-08-23",
+      bankCsv,
+      ledgerCsv,
+      modelAdapter: adapter,
+      reasoningConcurrency: 2,
+      clock: () => new Date("2026-01-01T00:00:00.000Z"),
+    });
+
+    expect(result.results.map((item) => item.outcome)).toEqual(["RECONCILED", "UNRESOLVED"]);
+    expect(result.results[0]?.ledgerRecordIds).toEqual(["L1"]);
+    expect(result.results[1]?.reasonCode).toBe("VERIFICATION_FAILED");
   });
 
   it("does not record fake completion when the injected adapter throws", async () => {
@@ -219,6 +353,126 @@ describe("T023 end-to-end reconciliation pipeline", () => {
       modelAdapter: adapter,
     })).rejects.toThrow();
   });
+
+  it("finalizes stable work order even when the later proposal returns first", async () => {
+    const bankCsv = [
+      BANK_HEADERS.join(","),
+      "B1,2026-08-11,2026-08-11,100.00,INR,CREDIT,,Same,,",
+      "B2,2026-08-11,2026-08-11,100.00,INR,CREDIT,,Same,,",
+    ].join("\n");
+    const ledgerCsv = [LEDGER_HEADERS.join(","), "L1,2026-08-10,,100.00,INR,CREDIT,,Same,,ERP,"].join("\n");
+    let releaseFirst!: () => void;
+    const firstBlocked = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    const adapter: ReasoningModelAdapter = {
+      generateProposal: async ({ input }) => {
+        const primary = input.match(/"primary":\{"side":"BANK","record":\{"bankTxnId":"([^"]+)"/);
+        if (primary === null) throw new Error("missing primary");
+        const bankId = primary[1]!;
+        if (bankId === "B1") await firstBlocked;
+        else releaseFirst();
+        return {
+          proposedOutcome: "MATCH",
+          bankRecordIds: [bankId],
+          ledgerRecordIds: ["L1"],
+          confidence: "HIGH",
+          evidence: [{ statement: "Configured overlap evidence.", source: "CROSS_RECORD", recordIds: [bankId, "L1"] }],
+          conflictingEvidence: [],
+          reason: "Configured completion-order test proposal.",
+        };
+      },
+    };
+    const result = await runReconciliation({
+      runId: "run-completion-order-001",
+      asOfDate: "2026-08-23",
+      bankCsv,
+      ledgerCsv,
+      modelAdapter: adapter,
+      reasoningConcurrency: 2,
+      clock: () => new Date("2026-01-01T00:00:00.000Z"),
+    });
+    const proposed = result.trace.filter((event) => event.type === "AGENT_PROPOSED");
+    expect(proposed.map((event) => event.caseId)).toEqual(["BANK:B2", "BANK:B1"]);
+    expect(result.results.map((item) => [item.caseId, item.outcome])).toEqual([
+      ["BANK:B1", "RECONCILED"],
+      ["BANK:B2", "UNRESOLVED"],
+    ]);
+  });
+
+  it("skips a later-wave primary consumed by an earlier wave", async () => {
+    const bankCsv = [
+      BANK_HEADERS.join(","),
+      "B1,2026-08-11,2026-08-11,100.00,INR,CREDIT,,Alpha,,",
+      "B2,2026-08-11,2026-08-11,100.00,INR,CREDIT,,Beta,,",
+    ].join("\n");
+    const ledgerCsv = [LEDGER_HEADERS.join(","), "L1,2026-08-10,,100.00,INR,CREDIT,,Gamma,,ERP,"].join("\n");
+    const calls: string[] = [];
+    const adapter: ReasoningModelAdapter = {
+      generateProposal: async ({ input }) => {
+        const bankPrimary = input.match(/"primary":\{"side":"BANK","record":\{"bankTxnId":"([^"]+)"/);
+        const ledgerPrimary = input.match(/"primary":\{"side":"LEDGER","record":\{"ledgerTxnId":"([^"]+)"/);
+        if (bankPrimary !== null) {
+          calls.push(bankPrimary[1]!);
+          if (bankPrimary[1] === "B1") {
+            return {
+              proposedOutcome: "MATCH",
+              bankRecordIds: ["B1"],
+              ledgerRecordIds: ["L1"],
+              confidence: "HIGH",
+              evidence: [{ statement: "Configured reuse evidence.", source: "CROSS_RECORD", recordIds: ["B1", "L1"] }],
+              conflictingEvidence: [],
+              reason: "Configured later-wave test proposal.",
+            };
+          }
+        }
+        if (ledgerPrimary !== null) calls.push(ledgerPrimary[1]!);
+        return {
+          proposedOutcome: "INSUFFICIENT_EVIDENCE",
+          bankRecordIds: bankPrimary === null ? [] : [bankPrimary[1]!],
+          ledgerRecordIds: [],
+          confidence: "LOW",
+          evidence: [{ statement: "Insufficient evidence.", source: "BANK_RECORD", recordIds: [bankPrimary?.[1] ?? "B2"] }],
+          conflictingEvidence: [],
+          reason: "Configured later-wave skip proposal.",
+        };
+      },
+    };
+    await runReconciliation({
+      runId: "run-later-wave-skip-001",
+      asOfDate: "2026-08-23",
+      bankCsv,
+      ledgerCsv,
+      modelAdapter: adapter,
+      reasoningConcurrency: 2,
+      clock: () => new Date("2026-01-01T00:00:00.000Z"),
+    });
+    expect(calls).toEqual(["B1", "B2"]);
+  });
+
+  it("selects the earliest stable failure when multiple in-flight calls fail", async () => {
+    const bankCsv = [
+      BANK_HEADERS.join(","),
+      "B1,2026-08-11,2026-08-11,100.00,INR,CREDIT,NO1,,,",
+      "B2,2026-08-11,2026-08-11,100.00,INR,CREDIT,NO2,,,",
+      "B3,2026-08-11,2026-08-11,100.00,INR,CREDIT,NO3,,,",
+    ].join("\n");
+    const adapter: ReasoningModelAdapter = {
+      generateProposal: async ({ input }) => {
+        const primary = input.match(/"primary":\{"side":"BANK","record":\{"bankTxnId":"([^"]+)"/);
+        const id = primary?.[1] ?? "unknown";
+        if (id === "B1") await new Promise((resolve) => setTimeout(resolve, 15));
+        if (id === "B3") await new Promise((resolve) => setTimeout(resolve, 1));
+        throw new Error(`${id} failure`);
+      },
+    };
+    await expect(runReconciliation({
+      runId: "run-multi-failure-001",
+      asOfDate: "2026-08-23",
+      bankCsv,
+      ledgerCsv: `${LEDGER_HEADERS.join(",")}\n`,
+      modelAdapter: adapter,
+      reasoningConcurrency: 3,
+    })).rejects.toThrow("B1 failure");
+  });
 });
 
 function countBy(values: readonly string[]): Record<string, number> {
@@ -230,4 +484,12 @@ function countBy(values: readonly string[]): Record<string, number> {
 
 function sameIds(left: readonly string[], right: readonly string[]): boolean {
   return [...left].sort().join("|") === [...right].sort().join("|");
+}
+
+function expectReasoningTraceOrder(events: readonly { type: string; sequenceNo: number }[]): void {
+  const required = ["CANDIDATES_GENERATED", "AGENT_STARTED", "AGENT_PROPOSED", "VERIFICATION_CHECKED", "CASE_FINALIZED"];
+  const positions = required.map((type) => events.find((event) => event.type === type)?.sequenceNo);
+  expect(positions.every((position): position is number => position !== undefined)).toBe(true);
+  const presentPositions = positions.filter((position): position is number => position !== undefined);
+  expect(presentPositions).toEqual([...presentPositions].sort((left, right) => left - right));
 }

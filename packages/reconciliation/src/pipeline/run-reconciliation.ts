@@ -1,4 +1,5 @@
 import type { AgentProposal, FinalOutcome, ReasonCode } from "@tally/contracts";
+import pLimit from "p-limit";
 
 import { buildReconciliationReasoningInput, type ReasoningPrimary } from "../agent/index.js";
 import type { CandidatePrimary, CandidateSet } from "../candidates/index.js";
@@ -11,7 +12,18 @@ import { verifyMatchProposal, verifyNonMatchProposal, type MatchVerificationResu
 import { createTraceRecorder, type TraceRecorder } from "../trace/index.js";
 import type { FinalReconciliationResult, ReconciliationRunResult, RunReconciliationInput } from "./types.js";
 
+export const DEFAULT_REASONING_CONCURRENCY = 5;
+
+type PreparedReasoningItem = {
+  decision: Extract<DeterministicDecision, { status: "NEEDS_REASONING" }>;
+  primary: CandidatePrimary;
+  caseId: string;
+  candidateSet: CandidateSet;
+  promptInput: Awaited<ReturnType<typeof buildReconciliationReasoningInput>>;
+};
+
 export async function runReconciliation(input: RunReconciliationInput): Promise<ReconciliationRunResult> {
+  const reasoningConcurrency = validateReasoningConcurrency(input.reasoningConcurrency);
   // T022 retains an envelope timestamp for compatibility, but T023 ordering is
   // sequenceNo. Tests may inject a clock when they need reproducible snapshots.
   const trace = createTraceRecorder({ runId: input.runId, clock: input.clock });
@@ -107,83 +119,120 @@ export async function runReconciliation(input: RunReconciliationInput): Promise<
     .sort(compareReasoningDecisions);
   const usedRecords = cloneUsedRecords(deterministic.usedRecords);
 
-  for (const decision of reasoningDecisions) {
-    const primary = primaryForDecision(decision);
-    const primaryKeyValue = primaryKey(primary.side, primary.recordId);
-    if (finalizedPrimaries.has(primaryKeyValue) || isUsed(primary, usedRecords)) continue;
+  const limit = pLimit(reasoningConcurrency);
+  for (let waveStart = 0; waveStart < reasoningDecisions.length; waveStart += reasoningConcurrency) {
+    const waveDecisions = reasoningDecisions.slice(waveStart, waveStart + reasoningConcurrency);
+    const waveSnapshot = cloneUsedRecords(usedRecords);
+    const preparedItems: PreparedReasoningItem[] = [];
 
-    const currentCaseId = startCase(primary.side, primary.recordId);
+    for (const decision of waveDecisions) {
+      const primary = primaryForDecision(decision);
+      const primaryKeyValue = primaryKey(primary.side, primary.recordId);
+      if (finalizedPrimaries.has(primaryKeyValue) || isUsed(primary, waveSnapshot)) continue;
 
-    const candidateSet = generateCandidates({
-      primary,
-      records,
-      usedRecords,
-      requiredCandidateIds: decision.bankRecordIds.concat(decision.ledgerRecordIds),
-    });
-    trace.record({
-      type: "CANDIDATES_GENERATED",
-      caseId: currentCaseId,
-      payload: {
-        primarySide: primary.side,
-        primaryRecordId: primary.recordId,
-        candidateRecordIds: candidateSet.candidates.map((candidate) => candidate.recordId),
-        totalEligibleCandidates: candidateSet.totalEligibleCandidates,
-        truncated: candidateSet.truncated,
-      },
-    });
-
-    const promptInput = buildReconciliationReasoningInput({
-      primary: reasoningPrimary(records, primary),
-      candidateSet,
-      records,
-      runContext: { asOfDate: input.asOfDate },
-    });
-    trace.record({
-      type: "AGENT_STARTED",
-      caseId: currentCaseId,
-      payload: {
-        primarySide: primary.side,
-        primaryRecordId: primary.recordId,
-        candidateCount: candidateSet.candidates.length,
-      },
-    });
-    const proposal = await input.modelAdapter.generateProposal(promptInput);
-    trace.record({ type: "AGENT_PROPOSED", caseId: currentCaseId, payload: proposal });
-
-    const verification = proposal.proposedOutcome === "MATCH"
-      ? verifyMatchProposal({ proposal, primary, candidateSet, records, usedRecords })
-      : verifyNonMatchProposal({
-          proposal,
-          primary,
+      const currentCaseId = startCase(primary.side, primary.recordId);
+      const candidateSet = generateCandidates({
+        primary,
+        records,
+        usedRecords: waveSnapshot,
+        requiredCandidateIds: decision.bankRecordIds.concat(decision.ledgerRecordIds),
+      });
+      trace.record({
+        type: "CANDIDATES_GENERATED",
+        caseId: currentCaseId,
+        payload: {
+          primarySide: primary.side,
+          primaryRecordId: primary.recordId,
+          candidateRecordIds: candidateSet.candidates.map((candidate) => candidate.recordId),
+          totalEligibleCandidates: candidateSet.totalEligibleCandidates,
+          truncated: candidateSet.truncated,
+        },
+      });
+      preparedItems.push({
+        decision,
+        primary,
+        caseId: currentCaseId,
+        candidateSet,
+        promptInput: buildReconciliationReasoningInput({
+          primary: reasoningPrimary(records, primary),
           candidateSet,
           records,
-          usedRecords,
           runContext: { asOfDate: input.asOfDate },
-          reasoningContext: { deterministicReason: decision.reason === "MULTIPLE_CANDIDATES" || decision.reason === "GROUPING_AMBIGUITY" ? decision.reason : undefined },
-        });
-    trace.record({
-      type: "VERIFICATION_CHECKED",
-      caseId: currentCaseId,
-      payload: verificationPayload(verification),
-    });
+        }),
+      });
+    }
 
-    const result = finalizeAgentResult(currentCaseId, proposal, verification);
-    trace.record({
-      type: "CASE_FINALIZED",
-      caseId: currentCaseId,
-      payload: {
-        outcome: result.outcome,
-        bankRecordIds: result.bankRecordIds,
-        ledgerRecordIds: result.ledgerRecordIds,
-        reasonCode: result.reasonCode,
-      },
-    });
-    results.push(result);
-    consumeFinalResult(result, primary, usedRecords, finalizedPrimaries);
+    const settlements = await Promise.allSettled(preparedItems.map((item) => limit(async () => {
+      trace.record({
+        type: "AGENT_STARTED",
+        caseId: item.caseId,
+        payload: {
+          primarySide: item.primary.side,
+          primaryRecordId: item.primary.recordId,
+          candidateCount: item.candidateSet.candidates.length,
+        },
+      });
+      const proposal = await input.modelAdapter.generateProposal(item.promptInput);
+      trace.record({ type: "AGENT_PROPOSED", caseId: item.caseId, payload: proposal });
+      return proposal;
+    })));
+
+    for (let itemIndex = 0; itemIndex < preparedItems.length; itemIndex += 1) {
+      const item = preparedItems[itemIndex]!;
+      const settlement = settlements[itemIndex]!;
+      if (settlement.status === "rejected") throw settlement.reason;
+      finalizeAgentProposal(item, settlement.value, records, input.asOfDate, usedRecords, finalizedPrimaries, results, trace);
+    }
   }
 
   trace.record({ type: "RUN_COMPLETED", payload: { casesProcessed: results.length } });
   return { runId: input.runId, results, usedRecords, trace: trace.getEvents() };
+}
+
+function validateReasoningConcurrency(value: number | undefined): number {
+  const concurrency = value ?? DEFAULT_REASONING_CONCURRENCY;
+  if (!Number.isFinite(concurrency) || !Number.isInteger(concurrency) || concurrency < 1) {
+    throw new Error("reasoningConcurrency must be a finite positive integer");
+  }
+  return concurrency;
+}
+
+function finalizeAgentProposal(
+  item: PreparedReasoningItem,
+  proposal: AgentProposal,
+  records: RecordLookup,
+  asOfDate: string,
+  usedRecords: { bankRecordIds: Set<string>; ledgerRecordIds: Set<string> },
+  finalizedPrimaries: Set<string>,
+  results: FinalReconciliationResult[],
+  trace: TraceRecorder,
+): void {
+  const verification = proposal.proposedOutcome === "MATCH"
+    ? verifyMatchProposal({ proposal, primary: item.primary, candidateSet: item.candidateSet, records, usedRecords })
+    : verifyNonMatchProposal({
+        proposal,
+        primary: item.primary,
+        candidateSet: item.candidateSet,
+        records,
+        usedRecords,
+        runContext: { asOfDate },
+        reasoningContext: { deterministicReason: item.decision.reason === "MULTIPLE_CANDIDATES" || item.decision.reason === "GROUPING_AMBIGUITY" ? item.decision.reason : undefined },
+      });
+  trace.record({ type: "VERIFICATION_CHECKED", caseId: item.caseId, payload: verificationPayload(verification) });
+
+  const result = finalizeAgentResult(item.caseId, proposal, verification);
+  trace.record({
+    type: "CASE_FINALIZED",
+    caseId: item.caseId,
+    payload: {
+      outcome: result.outcome,
+      bankRecordIds: result.bankRecordIds,
+      ledgerRecordIds: result.ledgerRecordIds,
+      reasonCode: result.reasonCode,
+    },
+  });
+  results.push(result);
+  consumeFinalResult(result, item.primary, usedRecords, finalizedPrimaries);
 }
 
 function normalizeRecords(records: RecordLookup, trace: TraceRecorder): void {

@@ -17,6 +17,7 @@ export type RunReconciliationInput = {
   ledgerCsv: string;
   usedRecords?: UsedRecordState;
   modelAdapter: ReasoningModelAdapter;
+  reasoningConcurrency?: number;
   /** Test hook only; production runs use the recorder's default clock. */
   clock?: () => Date;
 };
