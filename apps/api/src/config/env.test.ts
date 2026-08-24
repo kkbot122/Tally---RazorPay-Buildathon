@@ -5,6 +5,7 @@ import { EnvSchema, loadConfig } from "./env.js";
 describe("API environment configuration", () => {
   it("provides safe local defaults", () => {
     expect(loadConfig({})).toEqual({
+      NODE_ENV: "development",
       PORT: 3001,
       DATABASE_URL: "postgresql://localhost:5432/tally",
       OPENAI_API_KEY: "",
@@ -26,5 +27,10 @@ describe("API environment configuration", () => {
 
     expect(() => EnvSchema.parse({ PORT: "70000" })).toThrow();
     expect(() => EnvSchema.parse({ WEB_ORIGIN: "not-a-url" })).toThrow();
+  });
+
+  it("requires a usable reasoning key in production", () => {
+    expect(() => loadConfig({ NODE_ENV: "production" })).toThrow(/OPENAI_API_KEY/);
+    expect(loadConfig({ NODE_ENV: "production", OPENAI_API_KEY: "prod-key" }).NODE_ENV).toBe("production");
   });
 });

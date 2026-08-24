@@ -56,6 +56,7 @@ export const traceEventTypeEnum = pgEnum("trace_event_type", [
 
 export const reconciliationRuns = pgTable("reconciliation_runs", {
   runId: text("run_id").primaryKey(),
+  asOfDate: date("as_of_date").notNull(),
   status: runStatusEnum("status").notNull().default("PENDING"),
   startedAt: timestamp("started_at", { withTimezone: true }),
   completedAt: timestamp("completed_at", { withTimezone: true }),
@@ -142,6 +143,7 @@ export const verificationResults = pgTable("verification_results", {
   uniquenessValid: boolean("uniqueness_valid").notNull(),
   hardConflicts: jsonb("hard_conflicts").$type<string[]>().notNull(),
   reason: text("reason").notNull(),
+  result: jsonb("result").$type<Record<string, unknown>>().notNull().default({}),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
@@ -157,7 +159,13 @@ export const reconciliationResults = pgTable(
     ledgerTxnIds: jsonb("ledger_txn_ids").$type<string[]>().notNull(),
     finalOutcome: finalOutcomeEnum("final_outcome").notNull(),
     reasonCode: text("reason_code").notNull(),
+    source: text("source").notNull(),
+    rule: text("rule"),
+    confidence: confidenceEnum("confidence"),
     evidence: jsonb("evidence").$type<Record<string, unknown>[]>().notNull(),
+    conflictingEvidence: jsonb("conflicting_evidence").$type<Record<string, unknown>[]>().notNull().default([]),
+    reason: text("reason"),
+    amountDeltaPaise: text("amount_delta_paise"),
     agentProposalId: text("agent_proposal_id").references(() => agentProposals.proposalId, {
       onDelete: "set null",
     }),

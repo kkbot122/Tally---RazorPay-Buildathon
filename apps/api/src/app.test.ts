@@ -1,8 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { buildApp, type DatabaseHandle } from "./app.js";
+import type { ReconciliationRunService } from "./run-service.js";
+import { createReconciliationRunService } from "./run-service.js";
+import type { ReconciliationRunRepository } from "./db/reconciliation-run-repository.js";
+import type { PersistCompletedRunInput } from "./db/reconciliation-run-repository.js";
+import { buildDevFixture, type BenchmarkCase } from "@tally/benchmark";
+import type { AgentProposal, ReasoningModelAdapter } from "@tally/reconciliation";
 
 const config = {
+  NODE_ENV: "test" as const,
   PORT: 3001,
   DATABASE_URL: "postgresql://localhost:5432/tally",
   OPENAI_API_KEY: "",
@@ -14,6 +21,25 @@ function createTestDatabase(overrides: Partial<DatabaseHandle> = {}): DatabaseHa
   return {
     check: async () => {},
     close: async () => {},
+    ...overrides,
+  };
+}
+
+function createTestService(overrides: Partial<ReconciliationRunService> = {}): ReconciliationRunService {
+  return {
+    createRun: async () => ({ runId: "run-api-001", status: "COMPLETED" }),
+    getSummary: async () => ({
+      runId: "run-api-001",
+      status: "COMPLETED",
+      totalCases: 2,
+      reconciled: 1,
+      explainedOutstanding: 0,
+      discrepancies: 1,
+      unresolved: 0,
+    }),
+    getResults: async () => [{ caseId: "BANK:B1" }, { caseId: "BANK:B2" }],
+    getExceptions: async () => [{ caseId: "BANK:B2", finalOutcome: "DISCREPANCY" }],
+    getTrace: async () => [{ sequenceNo: 1 }, { sequenceNo: 2 }],
     ...overrides,
   };
 }
@@ -51,3 +77,134 @@ describe("GET /health/db", () => {
     await app.close();
   });
 });
+
+describe("reconciliation routes", () => {
+  it("accepts the frozen 20-case fixture through the injected T024/T025 composition", async () => {
+    const fixture = buildDevFixture();
+    const saved = vi.fn<(input: PersistCompletedRunInput) => Promise<void>>(async () => {});
+    const repo = {
+      saveCompletedRun: saved,
+      getRunById: async () => undefined,
+      getResultsForRun: async () => [],
+      getTraceForRun: async () => [],
+    } satisfies ReconciliationRunRepository;
+    const adapter = new FixtureAdapter(fixture.cases);
+    const service = createReconciliationRunService(repo, adapter, undefined, () => "run-20-case");
+    const app = buildApp(config, createTestDatabase(), service);
+
+    const response = await app.inject({ method: "POST", url: "/api/runs", payload: { asOfDate: fixture.asOfDate, bankCsv: fixture.bankCsv, ledgerCsv: fixture.ledgerCsv } });
+    expect(response.statusCode).toBe(200);
+    expect(saved).toHaveBeenCalledOnce();
+    const results = saved.mock.calls[0]![0].results;
+    expect({
+      length: results.length,
+      counts: {
+        RECONCILED: results.filter((item) => item.outcome === "RECONCILED").length,
+        EXPLAINED_OUTSTANDING: results.filter((item) => item.outcome === "EXPLAINED_OUTSTANDING").length,
+        DISCREPANCY: results.filter((item) => item.outcome === "DISCREPANCY").length,
+        UNRESOLVED: results.filter((item) => item.outcome === "UNRESOLVED").length,
+      },
+    }).toEqual({ length: 20, counts: { RECONCILED: 13, EXPLAINED_OUTSTANDING: 2, DISCREPANCY: 2, UNRESOLVED: 3 } });
+    expect(results.filter((item) => item.outcome === "RECONCILED")).toHaveLength(13);
+    expect(results.filter((item) => item.outcome === "EXPLAINED_OUTSTANDING")).toHaveLength(2);
+    expect(results.filter((item) => item.outcome === "DISCREPANCY")).toHaveLength(2);
+    expect(results.filter((item) => item.outcome === "UNRESOLVED")).toHaveLength(3);
+    await app.close();
+  });
+
+  it("runs through an injected service without requiring an API key", async () => {
+    const createRun = vi.fn(async () => ({ runId: "run-api-001", status: "COMPLETED" as const }));
+    const app = buildApp(config, createTestDatabase(), createTestService({ createRun }));
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs",
+      payload: { asOfDate: "2026-08-23", bankCsv: "bank", ledgerCsv: "ledger" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ runId: "run-api-001", status: "COMPLETED" });
+    expect(createRun).toHaveBeenCalledOnce();
+    await app.close();
+  });
+
+  it("rejects truth fields and client-controlled run IDs", async () => {
+    const createRun = vi.fn(async () => ({ runId: "server-run", status: "COMPLETED" as const }));
+    const app = buildApp(config, createTestDatabase(), createTestService({ createRun }));
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs",
+      payload: {
+        runId: "client-run",
+        asOfDate: "2026-08-23",
+        bankCsv: "bank",
+        ledgerCsv: "ledger",
+        truth: { expectedOutcome: "RECONCILED" },
+      },
+    });
+    expect(response.statusCode).toBe(400);
+    expect(createRun).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("sanitizes infrastructure failures and does not retry the service", async () => {
+    const createRun = vi.fn(async () => { throw new Error("postgres password and model details"); });
+    const app = buildApp(config, createTestDatabase(), createTestService({ createRun }));
+    const response = await app.inject({ method: "POST", url: "/api/runs", payload: { asOfDate: "2026-08-23", bankCsv: "bank", ledgerCsv: "ledger" } });
+    expect(response.statusCode).toBe(500);
+    expect(response.json()).toEqual({ error: "reconciliation run failed" });
+    expect(response.body).not.toContain("postgres password");
+    expect(createRun).toHaveBeenCalledOnce();
+    await app.close();
+  });
+
+  it.each(["/api/runs/unknown", "/api/runs/unknown/results", "/api/runs/unknown/exceptions", "/api/runs/unknown/events", "/api/runs/unknown/trace"])("returns 404 for an unknown run via %s", async (url) => {
+    const app = buildApp(config, createTestDatabase(), createTestService({
+      getSummary: async () => undefined,
+      getResults: async () => undefined,
+      getExceptions: async () => undefined,
+      getTrace: async () => undefined,
+    }));
+    const response = await app.inject({ method: "GET", url });
+    expect(response.statusCode).toBe(404);
+    await app.close();
+  });
+
+  it("returns ordered read-only results and filters exceptions", async () => {
+    const service = createTestService();
+    const app = buildApp(config, createTestDatabase(), service);
+    await expect(app.inject({ method: "GET", url: "/api/runs/run-api-001" })).resolves.toMatchObject({ statusCode: 200 });
+    expect((await app.inject({ method: "GET", url: "/api/runs/run-api-001/results" })).json()).toEqual([{ caseId: "BANK:B1" }, { caseId: "BANK:B2" }]);
+    expect((await app.inject({ method: "GET", url: "/api/runs/run-api-001/exceptions" })).json()).toEqual([{ caseId: "BANK:B2", finalOutcome: "DISCREPANCY" }]);
+    expect((await app.inject({ method: "GET", url: "/api/runs/run-api-001/events" })).json()).toEqual([{ sequenceNo: 1 }, { sequenceNo: 2 }]);
+    await app.close();
+  });
+});
+
+function proposalFor(benchmarkCase: BenchmarkCase): AgentProposal {
+  const bankRecordIds = benchmarkCase.truth.bankRecordIds;
+  const ledgerRecordIds = benchmarkCase.truth.ledgerRecordIds;
+  const recordIds = [...bankRecordIds, ...ledgerRecordIds];
+  const evidence = [{
+    statement: "The supplied records provide the configured fixture evidence.",
+    source: "CROSS_RECORD" as const,
+    recordIds: recordIds.length > 0 ? recordIds : [benchmarkCase.ledgerTransactions[0]?.ledgerTxnId ?? benchmarkCase.bankTransactions[0]!.bankTxnId],
+  }];
+  if (benchmarkCase.expectedOutcome === "RECONCILED") return { proposedOutcome: "MATCH", bankRecordIds, ledgerRecordIds, confidence: "HIGH", evidence, conflictingEvidence: [], reason: "The supplied evidence supports the configured relationship." };
+  if (benchmarkCase.expectedOutcome === "EXPLAINED_OUTSTANDING") return { proposedOutcome: "TIMING_DIFFERENCE", bankRecordIds, ledgerRecordIds, confidence: "HIGH", evidence, conflictingEvidence: [], reason: "The ledger record has future maturity evidence." };
+  if (benchmarkCase.expectedOutcome === "DISCREPANCY") return { proposedOutcome: "DISCREPANCY", bankRecordIds, ledgerRecordIds, confidence: "HIGH", evidence, conflictingEvidence: benchmarkCase.reasonCode === "CONFLICTING_RECORDS" ? [{ statement: "The supplied records contain conflicting evidence.", source: "CROSS_RECORD", recordIds }] : [], reason: "The supplied records do not support an equal financial relationship." };
+  const primaryId = benchmarkCase.bankTransactions[0]?.bankTxnId ?? benchmarkCase.ledgerTransactions[0]!.ledgerTxnId;
+  return { proposedOutcome: "INSUFFICIENT_EVIDENCE", bankRecordIds: benchmarkCase.bankTransactions.length > 0 ? [primaryId] : [], ledgerRecordIds: benchmarkCase.bankTransactions.length === 0 ? [primaryId] : [], confidence: "LOW", evidence, conflictingEvidence: [], reason: "The supplied evidence does not establish a unique relationship." };
+}
+
+class FixtureAdapter implements ReasoningModelAdapter {
+  constructor(private readonly cases: readonly BenchmarkCase[]) {}
+
+  async generateProposal(input: { input: string }): Promise<AgentProposal> {
+    const match = input.input.match(/"primary":\{"side":"(BANK|LEDGER)","record":\{(?:"bankTxnId"|"ledgerTxnId"):"([^"]+)"/);
+    if (match === null) throw new Error("fixture adapter could not identify primary record");
+    const primaryId = match[2]!;
+    const benchmarkCase = this.cases.find((candidate) => candidate.bankTransactions.some((record) => record.bankTxnId === primaryId) || candidate.ledgerTransactions.some((record) => record.ledgerTxnId === primaryId));
+    if (benchmarkCase === undefined) throw new Error(`fixture case not found for ${primaryId}`);
+    return proposalFor(benchmarkCase);
+  }
+}
