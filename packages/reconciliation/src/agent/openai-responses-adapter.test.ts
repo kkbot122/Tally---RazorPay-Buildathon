@@ -76,7 +76,7 @@ describe("NvidiaChatCompletionsAdapter", () => {
     await expect(adapter.generateProposal({ input: "input" })).resolves.toEqual(proposal);
     expect(create).toHaveBeenCalledWith(expect.objectContaining({
       model: DEFAULT_NVIDIA_REASONING_MODEL,
-      messages: [{ role: "user", content: "input" }],
+      messages: [{ role: "user", content: expect.stringContaining("input") }],
       response_format: { type: "json_object" },
     }));
   });

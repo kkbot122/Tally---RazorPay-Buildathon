@@ -5,6 +5,19 @@ import type { AgentProposal } from "./proposal-schema.js";
 
 export const DEFAULT_NVIDIA_REASONING_MODEL = "meta/llama-3.1-70b-instruct";
 const NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1";
+const NVIDIA_PROPOSAL_FORMAT = `
+Return exactly one JSON object with these keys and no wrapper object:
+{
+  "proposedOutcome": "MATCH" | "TIMING_DIFFERENCE" | "DISCREPANCY" | "INSUFFICIENT_EVIDENCE",
+  "bankRecordIds": string[],
+  "ledgerRecordIds": string[],
+  "confidence": "HIGH" | "MEDIUM" | "LOW",
+  "evidence": [{ "statement": string, "source": "BANK_RECORD" | "LEDGER_RECORD" | "CROSS_RECORD" | "DETERMINISTIC", "kind": "REFERENCE" | "COUNTERPARTY" | "DESCRIPTION" | "BATCH" | "AMOUNT" | "DATE" | "GROUPING" | "SEMANTIC" | "DETERMINISTIC", "recordIds": string[] }],
+  "conflictingEvidence": [{ "statement": string, "source": "BANK_RECORD" | "LEDGER_RECORD" | "CROSS_RECORD" | "DETERMINISTIC", "kind": "REFERENCE" | "COUNTERPARTY" | "DESCRIPTION" | "BATCH" | "AMOUNT" | "DATE" | "GROUPING" | "SEMANTIC" | "DETERMINISTIC", "recordIds": string[] }],
+  "reason": string
+}
+Do not use snake_case keys. Do not put the proposal under another key. Evidence must be an array of objects, not strings.
+`;
 
 type ChatCompletionsClient = Pick<OpenAI["chat"]["completions"], "create">;
 
@@ -32,7 +45,7 @@ export class NvidiaChatCompletionsAdapter implements ReasoningModelAdapter {
     try {
       response = await this.client.create({
         model: this.model,
-        messages: [{ role: "user", content: input.input }],
+        messages: [{ role: "user", content: `${input.input}\n${NVIDIA_PROPOSAL_FORMAT}` }],
         response_format: { type: "json_object" },
         temperature: 0,
       });
