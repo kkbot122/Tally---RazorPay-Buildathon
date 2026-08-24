@@ -367,6 +367,17 @@ describe("reconciliation routes", () => {
     await app.close();
   });
 
+  it("allows only the configured web origin and supports preflight", async () => {
+    const app = buildApp(config, createTestDatabase(), createTestService());
+    const allowed = await app.inject({ method: "OPTIONS", url: "/api/runs", headers: { origin: config.WEB_ORIGIN } });
+    const denied = await app.inject({ method: "OPTIONS", url: "/api/runs", headers: { origin: "https://unexpected.example" } });
+    expect(allowed.statusCode).toBe(204);
+    expect(allowed.headers["access-control-allow-origin"]).toBe(config.WEB_ORIGIN);
+    expect(denied.statusCode).toBe(403);
+    expect(denied.headers["access-control-allow-origin"]).toBeUndefined();
+    await app.close();
+  });
+
   it("does not expose empty finance data for a failed run", async () => {
     const app = buildApp(config, createTestDatabase(), createTestService({
       getSummary: async () => { throw new RunFailedError(); },

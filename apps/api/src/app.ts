@@ -41,6 +41,23 @@ export function buildApp(
   evaluationService?: BenchmarkEvaluationService,
 ) {
   const app = Fastify({ logger: true });
+  const addCorsHeaders = (reply: { header: (name: string, value: string) => unknown }, origin: string | undefined) => {
+    if (origin !== config.WEB_ORIGIN) return;
+    reply.header("Access-Control-Allow-Origin", origin);
+    reply.header("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+    reply.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    reply.header("Vary", "Origin");
+  };
+  app.addHook("onSend", async (request, reply, payload) => {
+    addCorsHeaders(reply, request.headers.origin);
+    return payload;
+  });
+  app.options("/*", async (request, reply) => {
+    const origin = request.headers.origin;
+    if (origin !== config.WEB_ORIGIN) return reply.code(403).send({ error: "ORIGIN_NOT_ALLOWED", message: "The request origin is not allowed." });
+    addCorsHeaders(reply, origin);
+    return reply.code(204).send();
+  });
   app.setErrorHandler((error, request, reply) => {
     request.log.error(error, "request failed");
     if (error instanceof RunFailedError) return reply.code(500).send({ error: error.code, message: error.message });

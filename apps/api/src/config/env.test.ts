@@ -31,7 +31,8 @@ describe("API environment configuration", () => {
 
   it("requires a usable reasoning key in production", () => {
     expect(() => loadConfig({ NODE_ENV: "production" })).toThrow(/OPENAI_API_KEY/);
-    expect(loadConfig({ NODE_ENV: "production", OPENAI_API_KEY: "prod-key" }).NODE_ENV).toBe("production");
+    expect(() => loadConfig({ NODE_ENV: "production", OPENAI_API_KEY: "prod-key" })).toThrow(/DATABASE_URL/);
+    expect(loadConfig({ NODE_ENV: "production", OPENAI_API_KEY: "prod-key", DATABASE_URL: "postgresql://db.example/tally", WEB_ORIGIN: "https://web.example" }).NODE_ENV).toBe("production");
   });
 
   it("parses the E2E adapter flag exactly and only enables it in test", () => {

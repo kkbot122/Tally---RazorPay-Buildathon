@@ -14,8 +14,10 @@ export type AppConfig = z.infer<typeof EnvSchema>;
 
 export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppConfig {
   const config = EnvSchema.parse(environment);
-  if (config.NODE_ENV === "production" && config.OPENAI_API_KEY.trim().length === 0) {
-    throw new Error("OPENAI_API_KEY is required in production");
+  if (config.NODE_ENV === "production") {
+    if (config.OPENAI_API_KEY.trim().length === 0) throw new Error("OPENAI_API_KEY is required in production");
+    if (config.DATABASE_URL === "postgresql://localhost:5432/tally") throw new Error("DATABASE_URL is required in production");
+    if (config.WEB_ORIGIN === "http://localhost:3000") throw new Error("WEB_ORIGIN is required in production");
   }
   return config;
 }
