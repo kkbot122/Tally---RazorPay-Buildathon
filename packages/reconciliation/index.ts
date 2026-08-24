@@ -78,6 +78,7 @@ export type {
 export { runDeterministicReconciliation } from "./src/deterministic/index.js";
 export type {
   AutoReconciledDecision,
+  DeterministicObserver,
   DeterministicDecision,
   DeterministicReason,
   DeterministicReconciliationInput,
@@ -134,6 +135,13 @@ export type {
   TraceRecorder,
   TraceRecorderOptions,
 } from "./src/trace/index.js";
+
+export { runReconciliation } from "./src/pipeline/index.js";
+export type {
+  FinalReconciliationResult,
+  ReconciliationRunResult,
+  RunReconciliationInput,
+} from "./src/pipeline/index.js";
 
 export type {
   CsvSource,

@@ -1,6 +1,7 @@
 export { runDeterministicReconciliation } from "./orchestrator.js";
 export type {
   AutoReconciledDecision,
+  DeterministicObserver,
   DeterministicDecision,
   DeterministicReason,
   DeterministicReconciliationInput,

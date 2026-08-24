@@ -100,13 +100,36 @@ export function runDeterministicReconciliation(input: DeterministicReconciliatio
 
   for (const stage of stages) {
     const stageUsed = withBlockedRecords(usedRecords, blockedBankIds, blockedLedgerIds);
-    const evaluations = stage.anchors.map((anchorId) => {
+    const evaluations = stage.anchors.filter((anchorId) => {
+      return stage.rule === "R5_MANY_TO_ONE_GROUPED"
+        ? !stageUsed.ledgerRecordIds.has(anchorId)
+        : !stageUsed.bankRecordIds.has(anchorId);
+    }).map((anchorId) => {
+      const anchorSide = stage.rule === "R5_MANY_TO_ONE_GROUPED" ? "LEDGER" as const : "BANK" as const;
       events.push({ type: "RULE_EVALUATED", rule: stage.rule, anchorId });
+      input.observer?.onRuleEvaluated?.({ rule: stage.rule, anchorSide, anchorId });
       const evaluation = stage.evaluate(anchorId, stageUsed);
       if (evaluation.kind === "MATCH") {
         events.push({ type: "RULE_PASSED", rule: stage.rule, anchorId, bankRecordIds: [...evaluation.proposal.bankRecordIds].sort(), ledgerRecordIds: [...evaluation.proposal.ledgerRecordIds].sort() });
+        input.observer?.onRuleResult?.({
+          type: "RULE_PASSED",
+          rule: stage.rule,
+          anchorSide,
+          anchorId,
+          bankRecordIds: [...evaluation.proposal.bankRecordIds].sort(),
+          ledgerRecordIds: [...evaluation.proposal.ledgerRecordIds].sort(),
+          reasonCode: evaluation.proposal.reasonCode,
+        });
       } else {
         events.push({ type: "RULE_FAILED", rule: stage.rule, anchorId, reason: evaluation.kind === "AMBIGUOUS" ? evaluation.reason : "NO_RULE_MATCH" });
+        input.observer?.onRuleResult?.({
+          type: "RULE_FAILED",
+          rule: stage.rule,
+          anchorSide,
+          anchorId,
+          reason: evaluation.kind === "AMBIGUOUS" ? evaluation.reason : "NO_RULE_MATCH",
+          ...(evaluation.kind === "AMBIGUOUS" ? { candidateIds: [...evaluation.ledgerRecordIds, ...evaluation.bankRecordIds].sort() } : {}),
+        });
       }
       return evaluation;
     });
@@ -141,6 +164,14 @@ export function runDeterministicReconciliation(input: DeterministicReconciliatio
       commit(proposal, usedRecords);
       decisions.push(normalizeDecision(proposal));
       events.push({ type: "AUTO_RECONCILED", rule: proposal.rule, anchorId: proposal.anchorId, bankRecordIds: [...proposal.bankRecordIds].sort(), ledgerRecordIds: [...proposal.ledgerRecordIds].sort() });
+      input.observer?.onDecisionCommitted?.({
+        rule: proposal.rule,
+        anchorSide: proposal.rule === "R5_MANY_TO_ONE_GROUPED" ? "LEDGER" : "BANK",
+        anchorId: proposal.anchorId,
+        bankRecordIds: [...proposal.bankRecordIds].sort(),
+        ledgerRecordIds: [...proposal.ledgerRecordIds].sort(),
+        reasonCode: proposal.reasonCode,
+      });
     }
 
     for (const id of stageBlockedBankIds) blockedBankIds.add(id);

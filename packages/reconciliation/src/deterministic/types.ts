@@ -40,9 +40,46 @@ export type DeterministicRuleEvent = {
   reason?: DeterministicReason;
 };
 
+export type DeterministicObserver = {
+  onRuleEvaluated?: (event: {
+    rule: DeterministicRuleId;
+    anchorSide: "BANK" | "LEDGER";
+    anchorId: string;
+  }) => void;
+  onRuleResult?: (
+    event:
+      | {
+          type: "RULE_PASSED";
+          rule: DeterministicRuleId;
+          anchorSide: "BANK" | "LEDGER";
+          anchorId: string;
+          bankRecordIds: string[];
+          ledgerRecordIds: string[];
+          reasonCode: AutoReconciledDecision["reasonCode"];
+        }
+      | {
+          type: "RULE_FAILED";
+          rule: DeterministicRuleId;
+          anchorSide: "BANK" | "LEDGER";
+          anchorId: string;
+          reason: DeterministicReason;
+          candidateIds?: string[];
+        },
+  ) => void;
+  onDecisionCommitted?: (event: {
+    rule: DeterministicRuleId;
+    anchorSide: "BANK" | "LEDGER";
+    anchorId: string;
+    bankRecordIds: string[];
+    ledgerRecordIds: string[];
+    reasonCode: AutoReconciledDecision["reasonCode"];
+  }) => void;
+};
+
 export type DeterministicReconciliationInput = {
   records: RecordLookup;
   usedRecords?: UsedRecordState;
+  observer?: DeterministicObserver;
 };
 
 export type DeterministicReconciliationResult = {

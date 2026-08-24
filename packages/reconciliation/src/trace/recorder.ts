@@ -8,7 +8,7 @@ import type {
 
 import type { CandidatePrimary } from "../candidates/index.js";
 import type { DeterministicReason, DeterministicRuleId } from "../deterministic/index.js";
-import type { MatchVerificationFailure, NonMatchVerificationResult } from "../verifier/index.js";
+import type { MatchVerificationFailure, MatchVerificationResult, NonMatchVerificationResult } from "../verifier/index.js";
 
 export type TraceEventPayload = {
   RUN_STARTED: {
@@ -61,7 +61,7 @@ export type TraceEventPayload = {
   };
   AGENT_PROPOSED: AgentProposal;
   VERIFICATION_CHECKED: {
-    result: VerificationResult | NonMatchVerificationResult;
+    result: VerificationResult | MatchVerificationResult | NonMatchVerificationResult;
     failures?: MatchVerificationFailure[];
     outcome?: FinalOutcome;
     reasonCode?: ReasonCode;
