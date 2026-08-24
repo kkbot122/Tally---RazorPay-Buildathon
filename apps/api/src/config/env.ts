@@ -8,6 +8,7 @@ export const EnvSchema = z.object({
   OPENAI_MODEL: z.string().trim().min(1).default("gpt-5.6-terra"),
   AI_PROVIDER: z.enum(["openai", "nvidia"]).default("openai"),
   AI_BASE_URL: z.string().url().optional(),
+  AI_REASONING_EFFORT: z.enum(["none", "high", "max"]).default("none"),
   WEB_ORIGIN: z.string().url().default("http://localhost:3000"),
   TALLY_E2E_DETERMINISTIC_ADAPTER: z.enum(["true", "false"]).optional(),
 });

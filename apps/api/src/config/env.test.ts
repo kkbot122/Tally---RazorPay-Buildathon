@@ -11,6 +11,7 @@ describe("API environment configuration", () => {
       OPENAI_API_KEY: "",
       OPENAI_MODEL: "gpt-5.6-terra",
       AI_PROVIDER: "openai",
+      AI_REASONING_EFFORT: "none",
       WEB_ORIGIN: "http://localhost:3000",
     });
   });
@@ -24,7 +25,7 @@ describe("API environment configuration", () => {
         OPENAI_MODEL: "test-model",
         WEB_ORIGIN: "https://web.example",
       }),
-    ).toMatchObject({ PORT: 4000, OPENAI_MODEL: "test-model", AI_PROVIDER: "openai" });
+    ).toMatchObject({ PORT: 4000, OPENAI_MODEL: "test-model", AI_PROVIDER: "openai", AI_REASONING_EFFORT: "none" });
 
     expect(() => EnvSchema.parse({ PORT: "70000" })).toThrow();
     expect(() => EnvSchema.parse({ WEB_ORIGIN: "not-a-url" })).toThrow();

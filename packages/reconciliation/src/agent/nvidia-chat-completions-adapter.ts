@@ -25,15 +25,18 @@ export type NvidiaChatCompletionsAdapterOptions = {
   model?: string;
   apiKey?: string;
   baseURL?: string;
+  reasoningEffort?: "none" | "high" | "max";
   client?: ChatCompletionsClient;
 };
 
 export class NvidiaChatCompletionsAdapter implements ReasoningModelAdapter {
   private readonly model: string;
+  private readonly reasoningEffort: "none" | "high" | "max";
   private readonly client: ChatCompletionsClient;
 
   constructor(options: NvidiaChatCompletionsAdapterOptions = {}) {
     this.model = options.model ?? DEFAULT_NVIDIA_REASONING_MODEL;
+    this.reasoningEffort = options.reasoningEffort ?? "none";
     this.client = options.client ?? new OpenAI({
       apiKey: options.apiKey,
       baseURL: options.baseURL ?? NVIDIA_BASE_URL,
@@ -48,6 +51,8 @@ export class NvidiaChatCompletionsAdapter implements ReasoningModelAdapter {
         messages: [{ role: "user", content: `${input.input}\n${NVIDIA_PROPOSAL_FORMAT}` }],
         response_format: { type: "json_object" },
         temperature: 0,
+        max_tokens: 16384,
+        reasoning_effort: this.reasoningEffort,
       });
     } catch (error) {
       throw new ReasoningAdapterError("AI_REQUEST_ERROR", "The NVIDIA reasoning request failed.", { cause: error });

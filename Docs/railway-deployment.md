@@ -32,9 +32,10 @@ Required Railway variables:
 - `OPENAI_MODEL=gpt-5.6-terra` (or an approved configured model)
 - `AI_PROVIDER=openai` (use `nvidia` with an NVIDIA API key)
 - `AI_BASE_URL` (optional; use `https://integrate.api.nvidia.com/v1` for NVIDIA)
+- `AI_REASONING_EFFORT=none` for structured proposal output
 - `WEB_ORIGIN=https://<web-public-domain>`
 
-For NVIDIA’s hosted OpenAI-compatible API, set `AI_PROVIDER=nvidia`, `AI_BASE_URL=https://integrate.api.nvidia.com/v1`, `OPENAI_API_KEY=<NVIDIA API key>`, and use a served NVIDIA model such as `meta/llama-3.1-70b-instruct`. The application uses NVIDIA’s `/v1/chat/completions` path and validates the returned proposal against the shared contract.
+For NVIDIA’s hosted OpenAI-compatible API, set `AI_PROVIDER=nvidia`, `AI_BASE_URL=https://integrate.api.nvidia.com/v1`, `OPENAI_API_KEY=<NVIDIA API key>`, `OPENAI_MODEL=deepseek-ai/deepseek-v4-flash-0731`, and `AI_REASONING_EFFORT=none`. The application uses NVIDIA’s `/v1/chat/completions` path and validates the returned proposal against the shared contract.
 
 The API listens on Railway’s `PORT` and binds to `0.0.0.0`. `/health` is liveness-only; `/health/db` is available for database diagnostics and is not the deployment healthcheck.
 

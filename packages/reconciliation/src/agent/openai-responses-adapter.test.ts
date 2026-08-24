@@ -78,6 +78,8 @@ describe("NvidiaChatCompletionsAdapter", () => {
       model: DEFAULT_NVIDIA_REASONING_MODEL,
       messages: [{ role: "user", content: expect.stringContaining("input") }],
       response_format: { type: "json_object" },
+      max_tokens: 16384,
+      reasoning_effort: "none",
     }));
   });
 

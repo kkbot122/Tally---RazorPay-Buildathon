@@ -16,6 +16,7 @@ const config = {
   OPENAI_API_KEY: "",
   OPENAI_MODEL: "gpt-5.6-terra",
   AI_PROVIDER: "openai" as const,
+  AI_REASONING_EFFORT: "none" as const,
   WEB_ORIGIN: "http://localhost:3000",
 };
 
