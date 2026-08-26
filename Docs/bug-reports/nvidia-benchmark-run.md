@@ -248,9 +248,53 @@ running the benchmark while checking that the browser receives the initial run
 ID promptly and that the persisted status reaches `COMPLETED` or a visible
 `FAILED` state.
 
+## Follow-up incident: asynchronous runs fail silently after the AI deadline
+
+### Production evidence
+
+For run `run_41873010-a204-4818-a6b0-1d9aabcf0aec`:
+
+- `15:29:12Z`: `POST /api/runs` returned `202` in approximately 164 ms.
+- `15:29:12Z` through `15:30:15Z`: status polling returned `200` while the
+  run remained in progress.
+- `15:30:17Z`: status polling returned `500 RUN_FAILED` from
+  `RunService.getSummary`.
+- The run therefore failed about 65 seconds after submission, matching the
+  deployed 60-second AI request timeout plus orchestration overhead.
+- The exported logs contain no provider failure, run-failure, or failure-
+  persistence event for this run.
+
+### Confirmed failure modes
+
+1. A provider timeout or request error rejects an entire inference wave. The
+   pipeline only converts schema errors into safe unresolved cases; an
+   `AI_REQUEST_ERROR` rejects `Promise.allSettled` and fails the whole run.
+2. `getSummary()` throws `RunFailedError` for a persisted failed run. The API
+   turns that into HTTP 500, so the dashboard retains its previous
+   `PROCESSING` summary instead of rendering `FAILED`.
+3. Background failure persistence errors are swallowed. If the failure trace
+   insert fails, the run can remain `PROCESSING` and the trace endpoint returns
+   `TRACE_NOT_FOUND` without an explanatory server log.
+4. The current production logs do not record run ID, failure code, provider
+   attempt, duration, or failure-persistence outcome for background work.
+
+### Fix acceptance criteria
+
+- One AI timeout produces an `UNRESOLVED` case and does not discard other
+  finalized cases in the same run.
+- A run that cannot continue is persisted as `FAILED` and its status endpoint
+  returns a normal `FAILED` summary, not a generic 500.
+- Every failed run has at least a minimal persisted failure trace.
+- Failure-persistence errors are logged with run ID and sanitized codes.
+- A dashboard poll transitions visibly from `PROCESSING` to `FAILED`.
+
 ## Implementation boundary
 
-This report intentionally does not change application code. The next phase is:
+The fix is implemented locally. The remaining verification step is to apply the
+database migration in Railway, deploy the API and web services, and run a real
+benchmark upload while checking that the browser receives the initial run ID
+promptly and that the persisted status reaches `COMPLETED` or a visible
+`FAILED` state.
 
 ```text
 TDD regression tests

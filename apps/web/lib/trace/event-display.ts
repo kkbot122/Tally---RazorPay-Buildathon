@@ -10,6 +10,7 @@ export type TraceEventMeta = {
 
 export const TRACE_EVENT_META: Record<TraceEventType, TraceEventMeta> = {
   RUN_STARTED: { label: "Run started", stage: "Run", stageClassName: "bg-tally-surface-subtle text-tally-ink-secondary" },
+  RUN_FAILED: { label: "Run failed", stage: "Run", stageClassName: "bg-tally-danger-soft text-tally-danger" },
   CASE_STARTED: { label: "Case started", stage: "Run", stageClassName: "bg-tally-surface-subtle text-tally-ink-secondary" },
   TRANSACTION_NORMALIZED: { label: "Transaction normalized", stage: "Normalize", stageClassName: "bg-tally-accent-soft text-tally-accent" },
   RULE_EVALUATED: { label: "Rule evaluated", stage: "Rules", stageClassName: "bg-tally-surface-subtle text-tally-ink-secondary" },
@@ -84,6 +85,8 @@ export function eventSummary(event: TraceEvent): string {
     }
     case "RUN_COMPLETED":
       return `${numberValue(payload, "casesProcessed") ?? "Recorded"} cases processed`;
+    case "RUN_FAILED":
+      return `Operational failure${stringValue(payload, "failureCode") ? ` · ${readableCode(stringValue(payload, "failureCode")!)}` : ""}`;
     case "CASE_STARTED":
       return `Primary ${stringValue(payload, "primarySide") ?? "record"} ${stringValue(payload, "primaryRecordId") ?? "not recorded"}`;
     case "TRANSACTION_NORMALIZED":

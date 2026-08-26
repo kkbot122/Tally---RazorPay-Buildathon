@@ -276,7 +276,7 @@ describe("reconciliation routes", () => {
     await app.close();
   });
 
-  it("persists a failed status when the model boundary fails", async () => {
+  it("persists an unresolved result when the model boundary fails", async () => {
     const repository = {
       startRun: vi.fn(async () => {}),
       markRunFailed: vi.fn(async () => {}),
@@ -297,14 +297,10 @@ describe("reconciliation routes", () => {
     } });
     expect(response.statusCode).toBe(202);
     expect(response.json()).toEqual({ runId: "run-ai-failure", status: "PROCESSING" });
-    await vi.waitFor(() => expect(repository.markRunFailed).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(repository.saveCompletedRun).toHaveBeenCalledOnce());
     expect(response.body).not.toContain("OPENAI_API_KEY");
     expect(repository.startRun).toHaveBeenCalledOnce();
-    expect(repository.markRunFailed).toHaveBeenCalledWith("run-ai-failure", "AI_REQUEST_ERROR", expect.arrayContaining([
-      expect.objectContaining({ type: "RUN_STARTED" }),
-      expect.objectContaining({ type: "AGENT_STARTED" }),
-    ]));
-    expect(repository.saveCompletedRun).not.toHaveBeenCalled();
+    expect(repository.markRunFailed).not.toHaveBeenCalled();
     await app.close();
   });
 
@@ -334,8 +330,8 @@ describe("reconciliation routes", () => {
       expect(repository.markRunFailed).not.toHaveBeenCalled();
     } else {
       expect(response.statusCode).toBe(202);
-      await vi.waitFor(() => expect(repository.markRunFailed).toHaveBeenCalledOnce());
-      expect(repository.saveCompletedRun).not.toHaveBeenCalled();
+      await vi.waitFor(() => expect(repository.saveCompletedRun).toHaveBeenCalledOnce());
+      expect(repository.markRunFailed).not.toHaveBeenCalled();
     }
     await app.close();
   });
@@ -396,13 +392,13 @@ describe("reconciliation routes", () => {
 
   it("does not expose empty finance data for a failed run", async () => {
     const app = buildApp(config, createTestDatabase(), createTestService({
-      getSummary: async () => { throw new RunFailedError(); },
+      getSummary: async () => ({ runId: "run-api-001", status: "FAILED", totalCases: 0, reconciled: 0, explainedOutstanding: 0, discrepancies: 0, unresolved: 0 }),
       getResults: async () => { throw new RunFailedError(); },
     }));
     const summary = await app.inject({ method: "GET", url: "/api/runs/run-api-001" });
     const results = await app.inject({ method: "GET", url: "/api/runs/run-api-001/results" });
-    expect(summary.statusCode).toBe(500);
-    expect(summary.json()).toEqual({ error: "RUN_FAILED", message: "This reconciliation run failed and has no finance results." });
+    expect(summary.statusCode).toBe(200);
+    expect(summary.json()).toMatchObject({ runId: "run-api-001", status: "FAILED" });
     expect(results.statusCode).toBe(500);
     expect(results.json()).toEqual({ error: "RUN_FAILED", message: "This reconciliation run failed and has no finance results." });
     await app.close();

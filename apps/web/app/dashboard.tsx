@@ -128,6 +128,10 @@ export default function Dashboard() {
     setReadErrorCode(undefined);
     try {
       const nextSummary = await getRun(runId);
+      if (nextSummary.status === "FAILED") {
+        setSummary(nextSummary);
+        throw Object.assign(new Error(`Run ${runId} failed operationally; no finance outcome was produced.`), { code: "RUN_FAILED" });
+      }
       if (nextSummary.status !== "COMPLETED") throw new Error(`Run ${runId} is still ${nextSummary.status.toLowerCase()}.`);
       const nextResults = await getRunResults(runId);
       setSummary(nextSummary);
@@ -148,6 +152,9 @@ export default function Dashboard() {
     while (true) {
       const nextSummary = await getRun(runId);
       setSummary(nextSummary);
+      if (nextSummary.status === "FAILED") {
+        throw Object.assign(new Error(`Run ${runId} failed operationally; no finance outcome was produced.`), { code: "RUN_FAILED" });
+      }
       if (nextSummary.status === "COMPLETED") {
         await loadRunData(runId);
         return;

@@ -74,6 +74,8 @@ export function createReconciliationRunService(
   onVerificationFailure?: Parameters<typeof runReconciliation>[0]["onVerificationFailure"],
   schedule: (task: () => Promise<void>) => void = (task) => { void task(); },
   reasoningConcurrency = 2,
+  onRunFailure?: (event: { runId: string; failureCode: string; traceEventCount: number; failurePersistenceFailed?: boolean }) => void,
+  onModelFailure?: Parameters<typeof runReconciliation>[0]["onModelFailure"],
 ): ReconciliationRunService {
   async function executeRun(runId: string, request: CreateRunRequest): Promise<void> {
     try {
@@ -85,6 +87,7 @@ export function createReconciliationRunService(
         modelAdapter,
         reasoningConcurrency,
         onVerificationFailure,
+        onModelFailure,
       });
       try {
         await repository.saveCompletedRun(toPersistenceInput(request.asOfDate, result));
@@ -93,12 +96,14 @@ export function createReconciliationRunService(
         throw error;
       }
     } catch (error) {
+      const code = failureCode(error);
+      const trace = toPersistenceTrace(runId, error);
+      const persistedTrace = trace.length > 0 ? trace : fallbackFailureTrace(runId, code);
+      onRunFailure?.({ runId, failureCode: code, traceEventCount: persistedTrace.length });
       try {
-        const trace = toPersistenceTrace(runId, error);
-        if (trace.length > 0) await repository.markRunFailed(runId, failureCode(error), trace);
-        else await repository.markRunFailed(runId, failureCode(error));
+        await repository.markRunFailed(runId, code, persistedTrace);
       } catch {
-        // Preserve the run failure even if failure persistence also fails.
+        onRunFailure?.({ runId, failureCode: code, traceEventCount: persistedTrace.length, failurePersistenceFailed: true });
       }
     }
   }
@@ -119,7 +124,15 @@ export function createReconciliationRunService(
     async getSummary(runId) {
       const run = await repository.getRunById(runId);
       if (run === undefined) return undefined;
-      if (run.status === "FAILED") throw new RunFailedError();
+      if (run.status === "FAILED") return {
+        runId,
+        status: "FAILED",
+        totalCases: 0,
+        reconciled: 0,
+        explainedOutstanding: 0,
+        discrepancies: 0,
+        unresolved: 0,
+      };
       const results = await repository.getResultsForRun(runId);
       return {
         runId,
@@ -195,6 +208,19 @@ function toPersistenceTrace(runId: string, error: unknown): PersistedTraceEvent[
     message: event.message,
     payload: event.payload,
   }));
+}
+
+function fallbackFailureTrace(runId: string, failureCodeValue: string): PersistedTraceEvent[] {
+  return [{
+    eventId: `${runId}:failure`,
+    runId,
+    sequenceNo: 1,
+    caseId: null,
+    type: "RUN_FAILED",
+    occurredAt: new Date().toISOString(),
+    message: "Run failed before a detailed execution trace was available.",
+    payload: { failureCode: failureCodeValue },
+  }];
 }
 
 function attachTrace(error: unknown, trace: ReconciliationRunResult["trace"]): void {

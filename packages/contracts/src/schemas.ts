@@ -114,6 +114,7 @@ export const ReconciliationResultSchema = z.object({
 
 export const TraceEventTypeSchema = z.enum([
   "RUN_STARTED",
+  "RUN_FAILED",
   "CASE_STARTED",
   "TRANSACTION_NORMALIZED",
   "RULE_EVALUATED",

@@ -40,6 +40,7 @@ export const confidenceEnum = pgEnum("agent_confidence", ["HIGH", "MEDIUM", "LOW
 
 export const traceEventTypeEnum = pgEnum("trace_event_type", [
   "RUN_STARTED",
+  "RUN_FAILED",
   "CASE_STARTED",
   "TRANSACTION_NORMALIZED",
   "RULE_EVALUATED",

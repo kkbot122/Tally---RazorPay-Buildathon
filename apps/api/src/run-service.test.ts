@@ -58,7 +58,7 @@ describe("reconciliation run service", () => {
     const runPipeline = vi.fn(async ({ runId }: { runId: string }) => result(runId));
     const repo = repository();
     const scheduler = controlledScheduler();
-    const service = createReconciliationRunService(repo, adapter, runPipeline as typeof import("@tally/reconciliation").runReconciliation, undefined, undefined, scheduler.schedule);
+    const service = createReconciliationRunService(repo, adapter, runPipeline as typeof import("@tally/reconciliation").runReconciliation, () => "run-pipeline-failure", undefined, scheduler.schedule);
 
     await expect(service.createRun(request())).resolves.toMatchObject({ status: "PROCESSING" });
     expect(runPipeline).not.toHaveBeenCalled();
@@ -83,13 +83,15 @@ describe("reconciliation run service", () => {
     const runPipeline = vi.fn(async () => { throw new Error("pipeline failed"); });
     const repo = repository();
     const scheduler = controlledScheduler();
-    const service = createReconciliationRunService(repo, adapter, runPipeline as typeof import("@tally/reconciliation").runReconciliation, undefined, undefined, scheduler.schedule);
+    const service = createReconciliationRunService(repo, adapter, runPipeline as typeof import("@tally/reconciliation").runReconciliation, () => "run-pipeline-failure", undefined, scheduler.schedule);
 
     await expect(service.createRun(request())).resolves.toMatchObject({ status: "PROCESSING" });
     await scheduler.run();
     expect(runPipeline).toHaveBeenCalledOnce();
     expect(repo.saveCompletedRun).not.toHaveBeenCalled();
-    expect(repo.markRunFailed).toHaveBeenCalledOnce();
+    expect(repo.markRunFailed).toHaveBeenCalledWith("run-pipeline-failure", "SYSTEM_ERROR", expect.arrayContaining([
+      expect.objectContaining({ type: "RUN_FAILED" }),
+    ]));
   });
 
   it("does not rerun the pipeline when persistence fails", async () => {
@@ -105,7 +107,7 @@ describe("reconciliation run service", () => {
 
   it("does not expose finance results for a persisted failed run", async () => {
     const service = createReconciliationRunService(failedRunRepository(), adapter);
-    await expect(service.getSummary("run-failed")).rejects.toBeInstanceOf(RunFailedError);
+    await expect(service.getSummary("run-failed")).resolves.toMatchObject({ runId: "run-failed", status: "FAILED", totalCases: 0 });
     await expect(service.getResults("run-failed")).rejects.toBeInstanceOf(RunFailedError);
     await expect(service.getExceptions("run-failed")).rejects.toBeInstanceOf(RunFailedError);
   });

@@ -16,6 +16,9 @@ export type TraceEventPayload = {
     bankRecordCount?: number;
     ledgerRecordCount?: number;
   };
+  RUN_FAILED: {
+    failureCode?: string;
+  };
   CASE_STARTED: {
     primarySide?: CandidatePrimary["side"];
     primaryRecordId?: string;
@@ -78,7 +81,7 @@ export type TraceEventPayload = {
   };
 };
 
-export type RunScopedTraceEventType = "RUN_STARTED" | "RUN_COMPLETED";
+export type RunScopedTraceEventType = "RUN_STARTED" | "RUN_FAILED" | "RUN_COMPLETED";
 export type CaseScopedTraceEventType = Exclude<TraceEventType, RunScopedTraceEventType>;
 
 export type TraceRecordInput<T extends TraceEventType = TraceEventType> = T extends RunScopedTraceEventType
@@ -144,7 +147,7 @@ export function createTraceRecorder(options: TraceRecorderOptions): TraceRecorde
   return {
     record<T extends TraceEventType>(input: TraceRecordInput<T>): RecordedTraceEvent<T> {
       const eventType = input.type as TraceEventType;
-      const isCaseScoped = eventType !== "RUN_STARTED" && eventType !== "RUN_COMPLETED";
+      const isCaseScoped = !["RUN_STARTED", "RUN_FAILED", "RUN_COMPLETED"].includes(eventType);
       if (isCaseScoped && (typeof input.caseId !== "string" || input.caseId.trim().length === 0)) {
         throw new Error(`${eventType} requires a non-empty caseId`);
       }

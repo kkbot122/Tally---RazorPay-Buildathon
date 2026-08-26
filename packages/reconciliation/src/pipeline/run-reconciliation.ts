@@ -176,14 +176,9 @@ export async function runReconciliation(input: RunReconciliationInput): Promise<
       try {
         return await generateProposalWithVerifierRetry(item, input.modelAdapter, records, input.asOfDate, waveSnapshot, trace);
       } catch (error) {
-        if (!(error instanceof ReasoningAdapterError) || error.code !== "AI_SCHEMA_ERROR") throw error;
-        input.onVerificationFailure?.({
-          caseId: item.caseId,
-          proposedBankRecordIds: [],
-          proposedLedgerRecordIds: [],
-          failureCodes: [error.code],
-        });
-        const fallback = insufficientEvidenceProposal(item.primary);
+        if (!(error instanceof ReasoningAdapterError) || (error.code !== "AI_SCHEMA_ERROR" && error.code !== "AI_REQUEST_ERROR")) throw error;
+        input.onModelFailure?.({ runId: input.runId, caseId: item.caseId, failureCode: error.code });
+        const fallback = insufficientEvidenceProposal(item.primary, error.code);
         trace.record({ type: "AGENT_PROPOSED", caseId: item.caseId, payload: fallback });
         return fallback;
       }
@@ -196,7 +191,7 @@ export async function runReconciliation(input: RunReconciliationInput): Promise<
         attachTrace(settlement.reason, trace);
         throw settlement.reason;
       }
-      finalizeAgentProposal(item, settlement.value, records, input.asOfDate, usedRecords, finalizedPrimaries, results, trace, input.onVerificationFailure);
+      finalizeAgentProposal(item, settlement.value, records, input.runId, input.asOfDate, usedRecords, finalizedPrimaries, results, trace, input.onVerificationFailure);
     }
   }
 
@@ -216,6 +211,7 @@ function finalizeAgentProposal(
   item: PreparedReasoningItem,
   proposal: AgentProposal,
   records: RecordLookup,
+  runId: string,
   asOfDate: string,
   usedRecords: { bankRecordIds: Set<string>; ledgerRecordIds: Set<string> },
   finalizedPrimaries: Set<string>,
@@ -226,6 +222,7 @@ function finalizeAgentProposal(
   const verification = verifyAgentProposal(item, proposal, records, asOfDate, usedRecords);
   if (verification.status === "REJECTED") {
     onVerificationFailure?.({
+      runId,
       caseId: item.caseId,
       proposedBankRecordIds: [...proposal.bankRecordIds],
       proposedLedgerRecordIds: [...proposal.ledgerRecordIds],
@@ -319,7 +316,7 @@ function attachTrace(error: unknown, trace: TraceRecorder): void {
   }
 }
 
-function insufficientEvidenceProposal(primary: CandidatePrimary): AgentProposal {
+function insufficientEvidenceProposal(primary: CandidatePrimary, failureCode = "AI_SCHEMA_ERROR"): AgentProposal {
   const bankRecordIds = primary.side === "BANK" ? [primary.recordId] : [];
   const ledgerRecordIds = primary.side === "LEDGER" ? [primary.recordId] : [];
   return {
@@ -328,13 +325,13 @@ function insufficientEvidenceProposal(primary: CandidatePrimary): AgentProposal 
     ledgerRecordIds,
     confidence: "LOW",
     evidence: [{
-      statement: "The model response could not be validated; no finance relationship was accepted.",
+      statement: `The model response failed with ${failureCode}; no finance relationship was accepted.`,
       source: "DETERMINISTIC",
       kind: "DETERMINISTIC",
       recordIds: [...bankRecordIds, ...ledgerRecordIds],
     }],
     conflictingEvidence: [],
-    reason: "The model response could not be validated, so this case remains unresolved.",
+    reason: `The model response failed with ${failureCode}, so this case remains unresolved.`,
   };
 }
 

@@ -71,6 +71,17 @@ describe("T030 dashboard workflows", () => {
     expect(screen.queryByText("Unresolved")).toBeNull();
   });
 
+  it("replaces processing with the persisted failed status", async () => {
+    api.createRun.mockResolvedValueOnce({ runId: "run_failed", status: "PROCESSING" });
+    api.getRun.mockResolvedValueOnce({ runId: "run_failed", status: "FAILED", totalCases: 0, reconciled: 0, explainedOutstanding: 0, discrepancies: 0, unresolved: 0 });
+    render(<Dashboard />);
+    fillForm();
+    fireEvent.submit(screen.getByRole("button", { name: "Run reconciliation" }).closest("form")!);
+    await waitFor(() => expect(screen.getByText("FAILED")).toBeTruthy());
+    expect(screen.getByText(/failed operationally/)).toBeTruthy();
+    expect(api.getRunResults).not.toHaveBeenCalled();
+  });
+
   it("turns two immediate submissions into one POST and sends File.text contents", async () => {
     let resolveRun!: (value: { runId: string; status: "COMPLETED" }) => void;
     api.createRun.mockReturnValue(new Promise((resolve) => { resolveRun = resolve; }));

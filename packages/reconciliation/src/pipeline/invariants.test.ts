@@ -173,6 +173,16 @@ describe("T034 core engine safety invariants", () => {
     expect(result.trace.at(-1)?.type).toBe("RUN_COMPLETED");
   });
 
+  it("isolates model request failures as unresolved cases and completes the run", async () => {
+    const result = await runCase(
+      [{ id: "B1", reference: "BANK-ONLY", counterparty: "Bank Only" }],
+      [{ id: "L1", reference: "LEDGER-ONLY", counterparty: "Ledger Only" }],
+      { generateProposal: async () => { throw new ReasoningAdapterError("AI_REQUEST_ERROR", "provider timeout"); } },
+    );
+    expect(result.results.find((item) => item.caseId === "BANK:B1")).toMatchObject({ outcome: "UNRESOLVED" });
+    expect(result.trace.at(-1)?.type).toBe("RUN_COMPLETED");
+  });
+
   it("prevents a later AI proposal from reusing a record committed by a deterministic rule", async () => {
     const result = await runCase(
       [{ id: "B1", reference: "REF-1", counterparty: "Acme" }, { id: "B2", reference: "OTHER-REF", counterparty: "Other" }],

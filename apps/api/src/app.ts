@@ -75,6 +75,8 @@ export function buildApp(
     (event) => app.log.warn(event, "model proposal rejected by verifier"),
     undefined,
     config.AI_REASONING_CONCURRENCY ?? DEFAULT_REASONING_CONCURRENCY,
+    (event) => app.log.error(event, event.failurePersistenceFailed ? "run failure persistence failed" : "reconciliation run failed"),
+    (event) => app.log.warn(event, "model request failed"),
   ));
   const benchmarkEvaluationService = evaluationService ?? (database.db === undefined ? undefined : createBenchmarkEvaluationService(
       createReconciliationRunRepository(database.db),
