@@ -66,6 +66,18 @@ describe("OpenAIResponsesAdapter", () => {
     expect(error).toMatchObject({ code: "AI_REQUEST_ERROR" });
     expect((error as ReasoningAdapterError).cause).toBe(cause);
   });
+
+  it("passes cancellation to the SDK request options instead of the provider JSON body", async () => {
+    const parse = vi.fn().mockResolvedValue({ output_parsed: proposal });
+    const signal = new AbortController().signal;
+    const adapter = new OpenAIResponsesAdapter({ client: { parse } as never });
+
+    await expect(adapter.generateProposal({ input: "input", signal })).resolves.toEqual(proposal);
+
+    const request = parse.mock.calls[0]![0] as Record<string, unknown>;
+    expect(request.signal).toBeUndefined();
+    expect(parse.mock.calls[0]![1]).toEqual({ signal });
+  });
 });
 
 describe("NvidiaChatCompletionsAdapter", () => {
@@ -74,7 +86,7 @@ describe("NvidiaChatCompletionsAdapter", () => {
     const adapter = new NvidiaChatCompletionsAdapter({ client: { create } as never });
 
     await expect(adapter.generateProposal({ input: "input" })).resolves.toEqual(proposal);
-    expect(create).toHaveBeenCalledWith(expect.objectContaining({
+    expect(create.mock.calls[0]![0]).toEqual(expect.objectContaining({
       model: DEFAULT_NVIDIA_REASONING_MODEL,
       messages: [
         { role: "system", content: expect.stringContaining("recordIds") },
@@ -117,5 +129,17 @@ describe("NvidiaChatCompletionsAdapter", () => {
     expect(request.reasoning_effort).toBeUndefined();
     expect(request.extra_body).toBeUndefined();
     expect(request.chat_template_kwargs).toEqual({ enable_thinking: false });
+  });
+
+  it("passes cancellation to the SDK request options instead of the provider JSON body", async () => {
+    const create = vi.fn().mockResolvedValue({ choices: [{ message: { content: JSON.stringify(proposal) } }] });
+    const signal = new AbortController().signal;
+    const adapter = new NvidiaChatCompletionsAdapter({ client: { create } as never });
+
+    await expect(adapter.generateProposal({ input: "input", signal })).resolves.toEqual(proposal);
+
+    const request = create.mock.calls[0]![0] as Record<string, unknown>;
+    expect(request.signal).toBeUndefined();
+    expect(create.mock.calls[0]![1]).toEqual({ signal });
   });
 });

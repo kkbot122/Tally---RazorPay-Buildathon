@@ -37,11 +37,10 @@ export class OpenAIResponsesAdapter implements ReasoningModelAdapter {
       response = await this.client.parse({
         model: this.model,
         input: input.retryFeedback === undefined ? input.input : `${input.input}\n\nVERIFIER FEEDBACK FOR THIS REPAIR ATTEMPT:\n${input.retryFeedback}`,
-        signal: input.signal,
         text: {
           format: zodTextFormat(AgentProposalForModelSchema, "agent_proposal"),
         },
-      });
+      }, { signal: input.signal });
     } catch (error) {
       const code = error instanceof ZodError ? "AI_SCHEMA_ERROR" : "AI_REQUEST_ERROR";
       throw new ReasoningAdapterError(code, code === "AI_SCHEMA_ERROR" ? "The model response failed schema validation." : "The OpenAI reasoning request failed.", { cause: error });

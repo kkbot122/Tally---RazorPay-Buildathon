@@ -61,14 +61,13 @@ export class NvidiaChatCompletionsAdapter implements ReasoningModelAdapter {
           response_format: { type: "json_object" },
           temperature: 0,
           max_tokens: 16384,
-          signal: input.signal,
           ...(this.model.startsWith("nvidia/nemotron-3.5-lightning")
             ? { chat_template_kwargs: { enable_thinking: this.reasoningEffort !== "none" } }
             : {}),
         };
         // NVIDIA's provider-specific chat_template_kwargs is intentionally outside
         // the OpenAI SDK request type, but is part of NVIDIA's documented API.
-        return await this.client.create(request as never);
+        return await this.client.create(request as never, { signal: input.signal });
       } catch (error) {
         throw new ReasoningAdapterError("AI_REQUEST_ERROR", "The NVIDIA reasoning request failed.", { cause: error });
       }
