@@ -12,14 +12,14 @@ export const EnvSchema = z.object({
   AI_REASONING_EFFORT: z.enum(["none", "high", "max"]).default("none"),
   AI_REQUEST_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(600_000).default(12_000),
   AI_MAX_RETRIES: z.coerce.number().int().min(0).max(3).default(0),
-  AI_REASONING_CONCURRENCY: z.coerce.number().int().min(1).max(20).default(8),
+  AI_REASONING_CONCURRENCY: z.coerce.number().int().min(1).max(20).default(2),
   AI_RUN_DEADLINE_MS: z.coerce.number().int().min(10_000).max(600_000).default(90_000),
   WEB_ORIGIN: z.string().url().default("http://localhost:3000"),
   TALLY_E2E_DETERMINISTIC_ADAPTER: z.enum(["true", "false"]).optional(),
 });
 
 export const DEFAULT_NVIDIA_MODEL = "nvidia/nemotron-3.5-lightning-30b-a3b";
-export const DEFAULT_GEMINI_MODEL = "gemini-2.5-flash-lite";
+export const DEFAULT_GEMINI_MODEL = "gemini-3.6-flash";
 
 export type AppConfig = z.infer<typeof EnvSchema>;
 

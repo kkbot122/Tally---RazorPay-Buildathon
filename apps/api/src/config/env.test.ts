@@ -15,7 +15,7 @@ describe("API environment configuration", () => {
       AI_REASONING_EFFORT: "none",
       AI_REQUEST_TIMEOUT_MS: 12000,
       AI_MAX_RETRIES: 0,
-      AI_REASONING_CONCURRENCY: 8,
+      AI_REASONING_CONCURRENCY: 2,
       AI_RUN_DEADLINE_MS: 90000,
       WEB_ORIGIN: "http://localhost:3000",
     });
@@ -30,7 +30,7 @@ describe("API environment configuration", () => {
         OPENAI_MODEL: "test-model",
         WEB_ORIGIN: "https://web.example",
       }),
-    ).toMatchObject({ PORT: 4000, OPENAI_MODEL: "test-model", AI_PROVIDER: "openai", AI_REASONING_EFFORT: "none", AI_REASONING_CONCURRENCY: 8, AI_RUN_DEADLINE_MS: 90000 });
+    ).toMatchObject({ PORT: 4000, OPENAI_MODEL: "test-model", AI_PROVIDER: "openai", AI_REASONING_EFFORT: "none", AI_REASONING_CONCURRENCY: 2, AI_RUN_DEADLINE_MS: 90000 });
 
     expect(() => EnvSchema.parse({ PORT: "70000" })).toThrow();
     expect(() => EnvSchema.parse({ WEB_ORIGIN: "not-a-url" })).toThrow();
@@ -42,9 +42,9 @@ describe("API environment configuration", () => {
   });
 
   it("selects the Gemini default model and validates its production key", () => {
-    expect(loadConfig({ AI_PROVIDER: "gemini" }).OPENAI_MODEL).toBe("gemini-2.5-flash-lite");
+    expect(loadConfig({ AI_PROVIDER: "gemini" }).OPENAI_MODEL).toBe("gemini-3.6-flash");
     expect(() => loadConfig({ NODE_ENV: "production", AI_PROVIDER: "gemini", DATABASE_URL: "postgresql://db.example/tally", WEB_ORIGIN: "https://web.example" })).toThrow(/GEMINI_API_KEY/);
-    expect(loadConfig({ NODE_ENV: "production", AI_PROVIDER: "gemini", GEMINI_API_KEY: "gemini-key", DATABASE_URL: "postgresql://db.example/tally", WEB_ORIGIN: "https://web.example" }).OPENAI_MODEL).toBe("gemini-2.5-flash-lite");
+    expect(loadConfig({ NODE_ENV: "production", AI_PROVIDER: "gemini", GEMINI_API_KEY: "gemini-key", DATABASE_URL: "postgresql://db.example/tally", WEB_ORIGIN: "https://web.example" }).OPENAI_MODEL).toBe("gemini-3.6-flash");
   });
 
   it("requires a usable reasoning key in production", () => {

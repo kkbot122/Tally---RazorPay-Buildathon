@@ -36,13 +36,13 @@ Required Railway variables:
 - `AI_REASONING_EFFORT=none` for structured proposal output
 - `AI_REQUEST_TIMEOUT_MS=12000` to bound an individual provider request
 - `AI_MAX_RETRIES=0` to avoid multiplying the inference tail
-- `AI_REASONING_CONCURRENCY=8` as the initial bounded production setting
+- `AI_REASONING_CONCURRENCY=2` as the initial bounded production setting
 - `AI_RUN_DEADLINE_MS=90000` as the maximum run-level inference budget
 - `WEB_ORIGIN=https://<web-public-domain>`
 
 For NVIDIA’s hosted OpenAI-compatible API, set `AI_PROVIDER=nvidia`, `AI_BASE_URL=https://integrate.api.nvidia.com/v1`, `OPENAI_API_KEY=<NVIDIA API key>`, `OPENAI_MODEL=nvidia/nemotron-3.5-lightning-30b-a3b`, and `AI_REASONING_EFFORT=none`. The application uses NVIDIA’s `/v1/chat/completions` path, sends Nemotron’s documented `chat_template_kwargs.enable_thinking` option, and validates the returned proposal against the shared contract.
 
-For Gemini, set `AI_PROVIDER=gemini`, `GEMINI_API_KEY=<Google AI Studio API key>`, `OPENAI_MODEL=gemini-2.5-flash-lite` (or another configured Gemini model), and leave `AI_BASE_URL` empty. Gemini uses the native structured-output adapter; `OPENAI_API_KEY` is not used for this provider.
+For Gemini, set `AI_PROVIDER=gemini`, `GEMINI_API_KEY=<Google AI Studio API key>`, `OPENAI_MODEL=gemini-3.6-flash` (or another configured Gemini model), and leave `AI_BASE_URL` empty. Gemini uses the native structured-output adapter; `OPENAI_API_KEY` is not used for this provider.
 
 The API listens on Railway’s `PORT` and binds to `0.0.0.0`. `/health` is liveness-only; `/health/db` is available for database diagnostics and is not the deployment healthcheck.
 

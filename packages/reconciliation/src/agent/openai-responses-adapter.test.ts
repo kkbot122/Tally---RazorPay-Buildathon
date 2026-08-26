@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { ThinkingLevel } from "@google/genai";
 
 import { AgentProposalSchema } from "./proposal-schema.js";
 import { DEFAULT_REASONING_MODEL, OpenAIResponsesAdapter } from "./openai-responses-adapter.js";
@@ -146,7 +147,7 @@ describe("NvidiaChatCompletionsAdapter", () => {
 });
 
 describe("GeminiAdapter", () => {
-  it("requests schema-constrained JSON with thinking disabled and forwards cancellation", async () => {
+  it("requests schema-constrained JSON with minimal thinking and forwards cancellation", async () => {
     const generateContent = vi.fn().mockResolvedValue({ text: JSON.stringify(proposal) });
     const signal = new AbortController().signal;
     const adapter = new GeminiAdapter({ client: { generateContent } as never });
@@ -159,7 +160,7 @@ describe("GeminiAdapter", () => {
     expect(request.config).toMatchObject({
       abortSignal: signal,
       responseMimeType: "application/json",
-      thinkingConfig: { thinkingBudget: 0 },
+      thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL },
       responseJsonSchema: expect.objectContaining({ type: "object", additionalProperties: false }),
     });
   });

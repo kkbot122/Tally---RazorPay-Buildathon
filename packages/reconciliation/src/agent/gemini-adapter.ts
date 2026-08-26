@@ -1,9 +1,9 @@
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, ThinkingLevel } from "@google/genai";
 
 import { AgentProposalForModelSchema, type AgentProposal } from "./proposal-schema.js";
 import { ReasoningAdapterError, type ReasoningAdapterDiagnostics, type ReasoningModelAdapter, type ReasoningModelInput } from "./types.js";
 
-export const DEFAULT_GEMINI_REASONING_MODEL = "gemini-2.5-flash-lite";
+export const DEFAULT_GEMINI_REASONING_MODEL = "gemini-3.6-flash";
 
 type GeminiModelsClient = Pick<GoogleGenAI["models"], "generateContent">;
 
@@ -51,7 +51,7 @@ export class GeminiAdapter implements ReasoningModelAdapter {
           maxOutputTokens: 2048,
           responseMimeType: "application/json",
           responseJsonSchema: GEMINI_PROPOSAL_SCHEMA,
-          thinkingConfig: { thinkingBudget: 0 },
+          thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL },
         },
       });
     } catch (error) {
