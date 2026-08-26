@@ -17,6 +17,9 @@ const config = {
   OPENAI_MODEL: "gpt-5.6-terra",
   AI_PROVIDER: "openai" as const,
   AI_REASONING_EFFORT: "none" as const,
+  AI_REQUEST_TIMEOUT_MS: 60000,
+  AI_MAX_RETRIES: 0,
+  AI_REASONING_CONCURRENCY: 2,
   WEB_ORIGIN: "http://localhost:3000",
 };
 
@@ -187,7 +190,9 @@ describe("reconciliation routes", () => {
     const app = buildApp(config, createTestDatabase(), service);
 
     const response = await app.inject({ method: "POST", url: "/api/runs", payload: { asOfDate: fixture.asOfDate, bankCsv: fixture.bankCsv, ledgerCsv: fixture.ledgerCsv } });
-    expect(response.statusCode).toBe(200);
+    expect(response.statusCode).toBe(202);
+    expect(response.json()).toEqual({ runId: "run-20-case", status: "PROCESSING" });
+    await vi.waitFor(() => expect(saved).toHaveBeenCalledOnce());
     expect(saved).toHaveBeenCalledOnce();
     const results = saved.mock.calls[0]![0].results;
     expect({
@@ -290,8 +295,9 @@ describe("reconciliation routes", () => {
       bankCsv: "bank_txn_id,booking_date,value_date,amount,currency,direction,reference,counterparty,description,batch_id\nB1,2026-08-23,2026-08-23,100,INR,CREDIT,BANK-ONLY,Bank,Payment,",
       ledgerCsv: "ledger_txn_id,accounting_date,maturity_date,amount,currency,direction,reference,counterparty,description,source,batch_id\nL1,2026-08-23,2026-08-23,100,INR,CREDIT,LEDGER-ONLY,Ledger,Receipt,ERP,",
     } });
-    expect(response.statusCode).toBe(500);
-    expect(response.json()).toEqual({ error: "SYSTEM_ERROR", message: "The reconciliation run could not be completed." });
+    expect(response.statusCode).toBe(202);
+    expect(response.json()).toEqual({ runId: "run-ai-failure", status: "PROCESSING" });
+    await vi.waitFor(() => expect(repository.markRunFailed).toHaveBeenCalledOnce());
     expect(response.body).not.toContain("OPENAI_API_KEY");
     expect(repository.startRun).toHaveBeenCalledOnce();
     expect(repository.markRunFailed).toHaveBeenCalledWith("run-ai-failure", "AI_REQUEST_ERROR", expect.arrayContaining([
@@ -323,13 +329,12 @@ describe("reconciliation routes", () => {
       ledgerCsv: "ledger_txn_id,accounting_date,maturity_date,amount,currency,direction,reference,counterparty,description,source,batch_id\nL1,2026-08-23,2026-08-23,100,INR,CREDIT,LEDGER-ONLY,Ledger,Receipt,ERP,",
     } });
     if (_name === "malformed output") {
-      expect(response.statusCode).toBe(200);
-      expect(repository.saveCompletedRun).toHaveBeenCalledOnce();
+      expect(response.statusCode).toBe(202);
+      await vi.waitFor(() => expect(repository.saveCompletedRun).toHaveBeenCalledOnce());
       expect(repository.markRunFailed).not.toHaveBeenCalled();
     } else {
-      expect(response.statusCode).toBe(500);
-      expect(response.json()).toEqual({ error: "SYSTEM_ERROR", message: "The reconciliation run could not be completed." });
-      expect(repository.markRunFailed).toHaveBeenCalledOnce();
+      expect(response.statusCode).toBe(202);
+      await vi.waitFor(() => expect(repository.markRunFailed).toHaveBeenCalledOnce());
       expect(repository.saveCompletedRun).not.toHaveBeenCalled();
     }
     await app.close();

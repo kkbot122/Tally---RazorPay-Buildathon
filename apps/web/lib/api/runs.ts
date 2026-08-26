@@ -1,10 +1,11 @@
 import type { AgentEvidence, FinalOutcome, ReasonCode, TraceEvent } from "@tally/contracts";
 
 export type CreateRunInput = { asOfDate: string; bankCsv: string; ledgerCsv: string };
-export type CreatedRun = { runId: string; status: "COMPLETED" };
+export type RunStatus = "PENDING" | "PROCESSING" | "COMPLETED" | "FAILED";
+export type CreatedRun = { runId: string; status: "PROCESSING" | "COMPLETED" };
 export type RunSummary = {
   runId: string;
-  status: string;
+  status: RunStatus;
   totalCases: number;
   reconciled: number;
   explainedOutstanding: number;

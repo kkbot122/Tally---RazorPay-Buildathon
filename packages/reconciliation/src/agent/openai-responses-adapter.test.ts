@@ -80,7 +80,7 @@ describe("NvidiaChatCompletionsAdapter", () => {
         { role: "system", content: expect.stringContaining("recordIds") },
         { role: "user", content: "input" },
       ],
-      response_format: expect.objectContaining({ type: "json_schema" }),
+      response_format: { type: "json_object" },
       max_tokens: 16384,
     }));
   });

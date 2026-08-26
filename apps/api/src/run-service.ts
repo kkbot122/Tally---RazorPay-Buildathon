@@ -30,7 +30,7 @@ export const CreateRunRequestSchema = z.object({
 export type CreateRunRequest = z.infer<typeof CreateRunRequestSchema>;
 
 export interface ReconciliationRunService {
-  createRun(request: CreateRunRequest): Promise<{ runId: string; status: "COMPLETED" }>;
+  createRun(request: CreateRunRequest): Promise<{ runId: string; status: "PROCESSING" | "COMPLETED" }>;
   getSummary(runId: string): Promise<RunSummary | undefined>;
   getResults(runId: string): Promise<unknown[] | undefined>;
   getResult(runId: string, caseId: string): Promise<unknown | undefined>;
@@ -72,7 +72,37 @@ export function createReconciliationRunService(
   pipeline: typeof runReconciliation = runReconciliation,
   generateRunId: () => string = () => `run_${randomUUID()}`,
   onVerificationFailure?: Parameters<typeof runReconciliation>[0]["onVerificationFailure"],
+  schedule: (task: () => Promise<void>) => void = (task) => { void task(); },
+  reasoningConcurrency = 2,
 ): ReconciliationRunService {
+  async function executeRun(runId: string, request: CreateRunRequest): Promise<void> {
+    try {
+      const result = await pipeline({
+        runId,
+        asOfDate: request.asOfDate,
+        bankCsv: request.bankCsv,
+        ledgerCsv: request.ledgerCsv,
+        modelAdapter,
+        reasoningConcurrency,
+        onVerificationFailure,
+      });
+      try {
+        await repository.saveCompletedRun(toPersistenceInput(request.asOfDate, result));
+      } catch (error) {
+        attachTrace(error, result.trace);
+        throw error;
+      }
+    } catch (error) {
+      try {
+        const trace = toPersistenceTrace(runId, error);
+        if (trace.length > 0) await repository.markRunFailed(runId, failureCode(error), trace);
+        else await repository.markRunFailed(runId, failureCode(error));
+      } catch {
+        // Preserve the run failure even if failure persistence also fails.
+      }
+    }
+  }
+
   return {
     async createRun(request) {
       const validatedRequest = CreateRunRequestSchema.parse(request);
@@ -83,32 +113,8 @@ export function createReconciliationRunService(
       parseLedgerCsv(validatedRequest.ledgerCsv);
       const runId = generateRunId();
       await repository.startRun({ runId, asOfDate: validatedRequest.asOfDate });
-      try {
-        const result = await pipeline({
-          runId,
-          asOfDate: validatedRequest.asOfDate,
-          bankCsv: validatedRequest.bankCsv,
-          ledgerCsv: validatedRequest.ledgerCsv,
-          modelAdapter,
-          onVerificationFailure,
-        });
-        try {
-          await repository.saveCompletedRun(toPersistenceInput(validatedRequest.asOfDate, result));
-        } catch (error) {
-          attachTrace(error, result.trace);
-          throw error;
-        }
-      } catch (error) {
-        try {
-          const trace = toPersistenceTrace(runId, error);
-          if (trace.length > 0) await repository.markRunFailed(runId, failureCode(error), trace);
-          else await repository.markRunFailed(runId, failureCode(error));
-        } catch {
-          // Preserve the original provider/pipeline/persistence failure.
-        }
-        throw error;
-      }
-      return { runId, status: "COMPLETED" as const };
+      schedule(() => executeRun(runId, validatedRequest));
+      return { runId, status: "PROCESSING" as const };
     },
     async getSummary(runId) {
       const run = await repository.getRunById(runId);

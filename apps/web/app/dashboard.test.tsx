@@ -94,7 +94,7 @@ describe("T030 dashboard workflows", () => {
     await waitFor(() => expect(screen.getAllByText("Reconciled").length).toBeGreaterThan(0));
     expect(api.createRun).toHaveBeenCalledOnce();
     expect(api.getRun).toHaveBeenCalledTimes(2);
-    expect(api.getRunResults).toHaveBeenCalledTimes(2);
+    expect(api.getRunResults).toHaveBeenCalledOnce();
   });
 
   it("renders zero results without distribution segments", async () => {

@@ -17,6 +17,8 @@ export type OpenAIResponsesAdapterOptions = {
   model?: string;
   apiKey?: string;
   baseURL?: string;
+  timeout?: number;
+  maxRetries?: number;
   client?: ResponsesParseClient;
 };
 
@@ -26,7 +28,7 @@ export class OpenAIResponsesAdapter implements ReasoningModelAdapter {
 
   constructor(options: OpenAIResponsesAdapterOptions = {}) {
     this.model = options.model ?? DEFAULT_REASONING_MODEL;
-    this.client = options.client ?? new OpenAI({ apiKey: options.apiKey, baseURL: options.baseURL }).responses;
+    this.client = options.client ?? new OpenAI({ apiKey: options.apiKey, baseURL: options.baseURL, timeout: options.timeout, maxRetries: options.maxRetries }).responses;
   }
 
   async generateProposal(input: ReasoningModelInput): Promise<AgentProposal> {

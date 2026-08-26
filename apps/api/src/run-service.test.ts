@@ -40,15 +40,29 @@ function result(runId: string): ReconciliationRunResult {
   return { runId, results: [], usedRecords: { bankRecordIds: new Set(), ledgerRecordIds: new Set() }, trace: [] };
 }
 
+function controlledScheduler() {
+  let task: (() => Promise<void>) | undefined;
+  return {
+    schedule: (next: () => Promise<void>) => { task = next; },
+    run: async () => {
+      if (task === undefined) throw new Error("expected a scheduled run");
+      await task();
+    },
+  };
+}
+
 const adapter: ReasoningModelAdapter = { generateProposal: vi.fn() };
 
 describe("reconciliation run service", () => {
   it("executes the pipeline and persistence exactly once", async () => {
     const runPipeline = vi.fn(async ({ runId }: { runId: string }) => result(runId));
     const repo = repository();
-    const service = createReconciliationRunService(repo, adapter, runPipeline as typeof import("@tally/reconciliation").runReconciliation);
+    const scheduler = controlledScheduler();
+    const service = createReconciliationRunService(repo, adapter, runPipeline as typeof import("@tally/reconciliation").runReconciliation, undefined, undefined, scheduler.schedule);
 
-    await expect(service.createRun(request())).resolves.toMatchObject({ status: "COMPLETED" });
+    await expect(service.createRun(request())).resolves.toMatchObject({ status: "PROCESSING" });
+    expect(runPipeline).not.toHaveBeenCalled();
+    await scheduler.run();
     expect(runPipeline).toHaveBeenCalledOnce();
     expect(repo.saveCompletedRun).toHaveBeenCalledOnce();
   });
@@ -68,9 +82,11 @@ describe("reconciliation run service", () => {
   it("does not persist or rerun after a pipeline failure", async () => {
     const runPipeline = vi.fn(async () => { throw new Error("pipeline failed"); });
     const repo = repository();
-    const service = createReconciliationRunService(repo, adapter, runPipeline as typeof import("@tally/reconciliation").runReconciliation);
+    const scheduler = controlledScheduler();
+    const service = createReconciliationRunService(repo, adapter, runPipeline as typeof import("@tally/reconciliation").runReconciliation, undefined, undefined, scheduler.schedule);
 
-    await expect(service.createRun(request())).rejects.toThrow("pipeline failed");
+    await expect(service.createRun(request())).resolves.toMatchObject({ status: "PROCESSING" });
+    await scheduler.run();
     expect(runPipeline).toHaveBeenCalledOnce();
     expect(repo.saveCompletedRun).not.toHaveBeenCalled();
     expect(repo.markRunFailed).toHaveBeenCalledOnce();
@@ -79,9 +95,11 @@ describe("reconciliation run service", () => {
   it("does not rerun the pipeline when persistence fails", async () => {
     const runPipeline = vi.fn(async ({ runId }: { runId: string }) => result(runId));
     const repo = repository({ saveCompletedRun: vi.fn(async () => { throw new Error("persistence failed"); }) });
-    const service = createReconciliationRunService(repo, adapter, runPipeline as typeof import("@tally/reconciliation").runReconciliation);
+    const scheduler = controlledScheduler();
+    const service = createReconciliationRunService(repo, adapter, runPipeline as typeof import("@tally/reconciliation").runReconciliation, undefined, undefined, scheduler.schedule);
 
-    await expect(service.createRun(request())).rejects.toThrow("persistence failed");
+    await expect(service.createRun(request())).resolves.toMatchObject({ status: "PROCESSING" });
+    await scheduler.run();
     expect(runPipeline).toHaveBeenCalledOnce();
   });
 

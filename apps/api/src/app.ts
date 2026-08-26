@@ -1,6 +1,6 @@
 import { loadFrozenGroundTruth, loadFrozenPrimaryCaseAlignment } from "@tally/benchmark";
 import Fastify from "fastify";
-import { CsvValidationError, NvidiaChatCompletionsAdapter, OpenAIResponsesAdapter } from "@tally/reconciliation";
+import { CsvValidationError, DEFAULT_REASONING_CONCURRENCY, NvidiaChatCompletionsAdapter, OpenAIResponsesAdapter } from "@tally/reconciliation";
 import { ZodError } from "zod";
 import type { AppConfig } from "./config/env.js";
 import { loadConfig, useE2EDeterministicAdapter } from "./config/env.js";
@@ -68,11 +68,13 @@ export function buildApp(
     useE2EDeterministicAdapter(config)
       ? createE2EReasoningAdapter()
       : config.AI_PROVIDER === "nvidia"
-        ? new NvidiaChatCompletionsAdapter({ apiKey: config.OPENAI_API_KEY, model: config.OPENAI_MODEL, baseURL: config.AI_BASE_URL, reasoningEffort: config.AI_REASONING_EFFORT })
-        : new OpenAIResponsesAdapter({ apiKey: config.OPENAI_API_KEY, model: config.OPENAI_MODEL, baseURL: config.AI_BASE_URL }),
+        ? new NvidiaChatCompletionsAdapter({ apiKey: config.OPENAI_API_KEY, model: config.OPENAI_MODEL, baseURL: config.AI_BASE_URL, reasoningEffort: config.AI_REASONING_EFFORT, timeout: config.AI_REQUEST_TIMEOUT_MS, maxRetries: config.AI_MAX_RETRIES })
+        : new OpenAIResponsesAdapter({ apiKey: config.OPENAI_API_KEY, model: config.OPENAI_MODEL, baseURL: config.AI_BASE_URL, timeout: config.AI_REQUEST_TIMEOUT_MS, maxRetries: config.AI_MAX_RETRIES }),
     undefined,
     undefined,
     (event) => app.log.warn(event, "model proposal rejected by verifier"),
+    undefined,
+    config.AI_REASONING_CONCURRENCY ?? DEFAULT_REASONING_CONCURRENCY,
   ));
   const benchmarkEvaluationService = evaluationService ?? (database.db === undefined ? undefined : createBenchmarkEvaluationService(
       createReconciliationRunRepository(database.db),
@@ -135,7 +137,8 @@ export function buildApp(
     const parsed = CreateRunRequestSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: "invalid run request", details: parsed.error.flatten() });
     try {
-      return await runService.createRun(parsed.data);
+      const created = await runService.createRun(parsed.data);
+      return reply.code(created.status === "PROCESSING" ? 202 : 200).send(created);
     } catch (error) {
       request.log.error(error, "reconciliation run failed");
       if (error instanceof CsvValidationError) {

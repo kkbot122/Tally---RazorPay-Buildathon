@@ -69,7 +69,7 @@ function outcomeLabel(outcome: FinalOutcome): string {
 function statusStyles(status: RunSummary["status"]): string {
   return status === "COMPLETED"
     ? "bg-tally-success-soft text-tally-success"
-    : status === "PROCESSING"
+    : status === "PROCESSING" || status === "PENDING"
       ? "bg-tally-warning-soft text-tally-warning"
       : "bg-tally-danger-soft text-tally-danger";
 }
@@ -127,7 +127,9 @@ export default function Dashboard() {
     setReadError(null);
     setReadErrorCode(undefined);
     try {
-      const [nextSummary, nextResults] = await Promise.all([getRun(runId), getRunResults(runId)]);
+      const nextSummary = await getRun(runId);
+      if (nextSummary.status !== "COMPLETED") throw new Error(`Run ${runId} is still ${nextSummary.status.toLowerCase()}.`);
+      const nextResults = await getRunResults(runId);
       setSummary(nextSummary);
       setResults(nextResults);
       setHasLoadedRunData(true);
@@ -138,6 +140,21 @@ export default function Dashboard() {
       setReadErrorCode(errorCode(readFailure));
     } finally {
       setIsLoadingResults(false);
+    }
+  }
+
+  async function waitForRun(runId: string) {
+    const deadline = Date.now() + 15 * 60 * 1000;
+    while (true) {
+      const nextSummary = await getRun(runId);
+      setSummary(nextSummary);
+      if (nextSummary.status === "COMPLETED") {
+        await loadRunData(runId);
+        return;
+      }
+      setStatusMessage(`Reconciliation is ${nextSummary.status.toLowerCase()}…`);
+      if (Date.now() >= deadline) throw new Error("The reconciliation run exceeded the client wait limit.");
+      await new Promise<void>((resolve) => window.setTimeout(resolve, 1000));
     }
   }
 
@@ -158,19 +175,28 @@ export default function Dashboard() {
     setHasLoadedRunData(false);
     setStatusMessage("Reading files and starting reconciliation…");
     setIsRunning(true);
+    let createdRunId: string | null = null;
     try {
       const [bankCsv, ledgerCsv] = await Promise.all([bankFile.text(), ledgerFile.text()]);
       const created = await createRun({ asOfDate, bankCsv, ledgerCsv });
+      createdRunId = created.runId;
       setActiveRunId(created.runId);
       setSummary({ runId: created.runId, status: created.status, totalCases: 0, reconciled: 0, explainedOutstanding: 0, discrepancies: 0, unresolved: 0 });
       setResults([]);
-      setStatusMessage("Run completed. Loading persisted results…");
-      await loadRunData(created.runId);
+      setStatusMessage("Reconciliation accepted. Waiting for results…");
+      await waitForRun(created.runId);
       setStatusMessage(null);
     } catch (runError) {
-      setError(errorCode(runError) === "SYSTEM_ERROR"
-        ? "The reconciliation service is temporarily unavailable. No finance outcome was produced."
-        : runError instanceof Error ? runError.message : "Reconciliation could not be completed.");
+      if (createdRunId !== null) {
+        setReadError(errorCode(runError) === "RUN_FAILED"
+          ? `Run ${createdRunId} failed operationally; no finance outcome was produced.`
+          : runError instanceof Error ? runError.message : "Run results could not be loaded.");
+        setReadErrorCode(errorCode(runError));
+      } else {
+        setError(errorCode(runError) === "SYSTEM_ERROR"
+          ? "The reconciliation service is temporarily unavailable. No finance outcome was produced."
+          : runError instanceof Error ? runError.message : "Reconciliation could not be completed.");
+      }
       setStatusMessage(null);
     } finally {
       submissionLock.current.release();
@@ -216,6 +242,8 @@ export default function Dashboard() {
 
         {summary === null ? (
           <section className={`${surface} px-6 py-14 text-center`} aria-labelledby="ready-heading"><h2 id="ready-heading" className="mb-2 text-lg font-semibold">Ready for a run</h2><p className="mx-auto m-0 max-w-[440px] text-tally-ink-secondary">Upload the bank and ledger CSVs above to see completion status, operational counts, and the persisted result list here.</p></section>
+        ) : !hasLoadedRunData && (summary.status === "PENDING" || summary.status === "PROCESSING") ? (
+          <section className={`${surface} px-6 py-14 text-center`} role="status" aria-labelledby="run-progress-heading"><h2 id="run-progress-heading" className="mb-2 text-lg font-semibold">Reconciliation in progress</h2><p className="mx-auto m-0 max-w-[440px] text-tally-ink-secondary">The run is being processed in the background. This page will load the persisted results when it completes.</p></section>
         ) : !hasLoadedRunData ? (
           <section className={`${surface} px-6 py-14 text-center`} role="alert" aria-labelledby="results-unavailable-heading"><h2 id="results-unavailable-heading" className="mb-2 text-lg font-semibold">{readErrorCode === "RUN_FAILED" ? "Run failed" : "Run results unavailable"}</h2><p className="mx-auto m-0 max-w-[440px] text-tally-ink-secondary">{readErrorCode === "RUN_FAILED" ? "This operational failure produced no finance results. Resolve the underlying service issue before retrying." : "The run was created, but persisted finance results are not available yet. Use the retry control above to load them again."}</p></section>
         ) : (

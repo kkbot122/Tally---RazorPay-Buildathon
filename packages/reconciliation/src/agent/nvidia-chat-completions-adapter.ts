@@ -5,33 +5,6 @@ import type { AgentProposal } from "./proposal-schema.js";
 
 export const DEFAULT_NVIDIA_REASONING_MODEL = "nvidia/nemotron-3.5-lightning-30b-a3b";
 const NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1";
-const NVIDIA_PROPOSAL_JSON_SCHEMA = {
-  type: "object",
-  additionalProperties: false,
-  required: ["proposedOutcome", "bankRecordIds", "ledgerRecordIds", "confidence", "evidence", "conflictingEvidence", "reason"],
-  properties: {
-    proposedOutcome: { type: "string", enum: ["MATCH", "TIMING_DIFFERENCE", "DISCREPANCY", "INSUFFICIENT_EVIDENCE"] },
-    bankRecordIds: { type: "array", items: { type: "string", minLength: 1 } },
-    ledgerRecordIds: { type: "array", items: { type: "string", minLength: 1 } },
-    confidence: { type: "string", enum: ["HIGH", "MEDIUM", "LOW"] },
-    evidence: { type: "array", minItems: 1, items: { "$ref": "#/$defs/evidence" } },
-    conflictingEvidence: { type: "array", items: { "$ref": "#/$defs/evidence" } },
-    reason: { type: "string", minLength: 1 },
-  },
-  $defs: {
-    evidence: {
-      type: "object",
-      additionalProperties: false,
-      required: ["statement", "source", "kind", "recordIds"],
-      properties: {
-        statement: { type: "string", minLength: 1 },
-        source: { type: "string", enum: ["BANK_RECORD", "LEDGER_RECORD", "CROSS_RECORD", "DETERMINISTIC"] },
-        kind: { type: "string", enum: ["AMOUNT", "REFERENCE", "COUNTERPARTY", "DESCRIPTION", "BATCH", "DATE", "GROUPING", "SEMANTIC", "DETERMINISTIC"] },
-        recordIds: { type: "array", minItems: 1, items: { type: "string", minLength: 1 } },
-      },
-    },
-  },
-} as const;
 const NVIDIA_PROPOSAL_FORMAT = `
 Return exactly one JSON object with these keys and no wrapper object:
 {
@@ -55,6 +28,8 @@ export type NvidiaChatCompletionsAdapterOptions = {
   apiKey?: string;
   baseURL?: string;
   reasoningEffort?: "none" | "high" | "max";
+  timeout?: number;
+  maxRetries?: number;
   client?: ChatCompletionsClient;
 };
 
@@ -69,6 +44,8 @@ export class NvidiaChatCompletionsAdapter implements ReasoningModelAdapter {
     this.client = options.client ?? new OpenAI({
       apiKey: options.apiKey,
       baseURL: options.baseURL ?? NVIDIA_BASE_URL,
+      timeout: options.timeout,
+      maxRetries: options.maxRetries,
     }).chat.completions;
   }
 
@@ -81,10 +58,7 @@ export class NvidiaChatCompletionsAdapter implements ReasoningModelAdapter {
             { role: "system", content: NVIDIA_PROPOSAL_FORMAT },
             { role: "user", content: input.retryFeedback === undefined ? instruction : `${instruction}\n\nVERIFIER FEEDBACK FOR THIS REPAIR ATTEMPT:\n${input.retryFeedback}` },
           ],
-          response_format: {
-            type: "json_schema",
-            json_schema: { name: "agent_proposal", strict: true, schema: NVIDIA_PROPOSAL_JSON_SCHEMA },
-          },
+          response_format: { type: "json_object" },
           temperature: 0,
           max_tokens: 16384,
           ...(this.model.startsWith("nvidia/nemotron-3.5-lightning")
@@ -93,16 +67,7 @@ export class NvidiaChatCompletionsAdapter implements ReasoningModelAdapter {
         };
         // NVIDIA's provider-specific chat_template_kwargs is intentionally outside
         // the OpenAI SDK request type, but is part of NVIDIA's documented API.
-        try {
-          return await this.client.create(request as never);
-        } catch (error) {
-          // Hosted endpoints may expose JSON mode without exposing guided JSON
-          // schema decoding. Fall back only for that provider capability error;
-          // all other request failures remain fatal.
-          const message = error instanceof Error ? error.message : String(error);
-          if (!message.includes("json_schema") && !message.includes("guided_json") && !message.includes("response_format")) throw error;
-          return await this.client.create({ ...request, response_format: { type: "json_object" } } as never);
-        }
+        return await this.client.create(request as never);
       } catch (error) {
         throw new ReasoningAdapterError("AI_REQUEST_ERROR", "The NVIDIA reasoning request failed.", { cause: error });
       }
