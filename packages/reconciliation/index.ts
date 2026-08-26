@@ -105,6 +105,8 @@ export {
   OpenAIResponsesAdapter,
   DEFAULT_NVIDIA_REASONING_MODEL,
   NvidiaChatCompletionsAdapter,
+  DEFAULT_GEMINI_REASONING_MODEL,
+  GeminiAdapter,
   RECONCILIATION_AGENT_INSTRUCTIONS,
   ReasoningAdapterError,
 } from "./src/agent/index.js";
@@ -112,7 +114,9 @@ export { ReconciliationRunAbortedError } from "./src/pipeline/types.js";
 export type {
   OpenAIResponsesAdapterOptions,
   NvidiaChatCompletionsAdapterOptions,
+  GeminiAdapterOptions,
   ReasoningAdapterErrorCode,
+  ReasoningAdapterDiagnostics,
   ReasoningModelAdapter,
   ReasoningModelInput,
 } from "./src/agent/index.js";

@@ -179,7 +179,7 @@ export async function runReconciliation(input: RunReconciliationInput): Promise<
       } catch (error) {
         if (input.signal?.aborted) throw new ReconciliationRunAbortedError(abortReason(input.signal));
         if (!(error instanceof ReasoningAdapterError) || (error.code !== "AI_SCHEMA_ERROR" && error.code !== "AI_REQUEST_ERROR")) throw error;
-        input.onModelFailure?.({ runId: input.runId, caseId: item.caseId, failureCode: error.code });
+        input.onModelFailure?.({ runId: input.runId, caseId: item.caseId, failureCode: error.code, diagnostics: error.diagnostics });
         const fallback = insufficientEvidenceProposal(item.primary, error.code);
         trace.record({ type: "AGENT_PROPOSED", caseId: item.caseId, payload: fallback });
         return fallback;

@@ -14,6 +14,7 @@ const config = {
   PORT: 3001,
   DATABASE_URL: "postgresql://localhost:5432/tally",
   OPENAI_API_KEY: "",
+  GEMINI_API_KEY: "",
   OPENAI_MODEL: "gpt-5.6-terra",
   AI_PROVIDER: "openai" as const,
   AI_REASONING_EFFORT: "none" as const,

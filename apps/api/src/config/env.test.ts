@@ -9,6 +9,7 @@ describe("API environment configuration", () => {
       PORT: 3001,
       DATABASE_URL: "postgresql://localhost:5432/tally",
       OPENAI_API_KEY: "",
+      GEMINI_API_KEY: "",
       OPENAI_MODEL: "gpt-5.6-terra",
       AI_PROVIDER: "openai",
       AI_REASONING_EFFORT: "none",
@@ -38,6 +39,12 @@ describe("API environment configuration", () => {
   it("selects a valid NVIDIA model when the OpenAI default is left unchanged", () => {
     expect(loadConfig({ AI_PROVIDER: "nvidia" }).OPENAI_MODEL).toBe("nvidia/nemotron-3.5-lightning-30b-a3b");
     expect(loadConfig({ AI_PROVIDER: "nvidia", OPENAI_MODEL: "nvidia/custom-model" }).OPENAI_MODEL).toBe("nvidia/custom-model");
+  });
+
+  it("selects the Gemini default model and validates its production key", () => {
+    expect(loadConfig({ AI_PROVIDER: "gemini" }).OPENAI_MODEL).toBe("gemini-2.5-flash-lite");
+    expect(() => loadConfig({ NODE_ENV: "production", AI_PROVIDER: "gemini", DATABASE_URL: "postgresql://db.example/tally", WEB_ORIGIN: "https://web.example" })).toThrow(/GEMINI_API_KEY/);
+    expect(loadConfig({ NODE_ENV: "production", AI_PROVIDER: "gemini", GEMINI_API_KEY: "gemini-key", DATABASE_URL: "postgresql://db.example/tally", WEB_ORIGIN: "https://web.example" }).OPENAI_MODEL).toBe("gemini-2.5-flash-lite");
   });
 
   it("requires a usable reasoning key in production", () => {

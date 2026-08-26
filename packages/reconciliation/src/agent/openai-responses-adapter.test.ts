@@ -4,6 +4,7 @@ import { AgentProposalSchema } from "./proposal-schema.js";
 import { DEFAULT_REASONING_MODEL, OpenAIResponsesAdapter } from "./openai-responses-adapter.js";
 import { ReasoningAdapterError } from "./types.js";
 import { DEFAULT_NVIDIA_REASONING_MODEL, NvidiaChatCompletionsAdapter } from "./nvidia-chat-completions-adapter.js";
+import { DEFAULT_GEMINI_REASONING_MODEL, GeminiAdapter } from "./gemini-adapter.js";
 
 const proposal = {
   proposedOutcome: "MATCH",
@@ -141,5 +142,43 @@ describe("NvidiaChatCompletionsAdapter", () => {
     const request = create.mock.calls[0]![0] as Record<string, unknown>;
     expect(request.signal).toBeUndefined();
     expect(create.mock.calls[0]![1]).toEqual({ signal });
+  });
+});
+
+describe("GeminiAdapter", () => {
+  it("requests schema-constrained JSON with thinking disabled and forwards cancellation", async () => {
+    const generateContent = vi.fn().mockResolvedValue({ text: JSON.stringify(proposal) });
+    const signal = new AbortController().signal;
+    const adapter = new GeminiAdapter({ client: { generateContent } as never });
+
+    await expect(adapter.generateProposal({ input: "input", signal })).resolves.toEqual(proposal);
+
+    const request = generateContent.mock.calls[0]![0] as { model: string; contents: string; config: Record<string, unknown> };
+    expect(request.model).toBe(DEFAULT_GEMINI_REASONING_MODEL);
+    expect(request.contents).toBe("input");
+    expect(request.config).toMatchObject({
+      abortSignal: signal,
+      responseMimeType: "application/json",
+      thinkingConfig: { thinkingBudget: 0 },
+      responseJsonSchema: expect.objectContaining({ type: "object", additionalProperties: false }),
+    });
+  });
+
+  it("rejects malformed Gemini output without fabricating a proposal", async () => {
+    const generateContent = vi.fn().mockResolvedValue({ text: "not-json" });
+    const adapter = new GeminiAdapter({ client: { generateContent } as never });
+
+    await expect(adapter.generateProposal({ input: "input" })).rejects.toMatchObject({ code: "AI_SCHEMA_ERROR" });
+  });
+
+  it("normalizes Gemini provider failures with sanitized diagnostics", async () => {
+    const providerError = Object.assign(new Error("quota exceeded"), { status: 429 });
+    const generateContent = vi.fn().mockRejectedValue(providerError);
+    const adapter = new GeminiAdapter({ model: "gemini-test", client: { generateContent } as never });
+
+    await expect(adapter.generateProposal({ input: "input" })).rejects.toMatchObject({
+      code: "AI_REQUEST_ERROR",
+      diagnostics: { provider: "gemini", model: "gemini-test", category: "RATE_LIMIT", status: 429 },
+    });
   });
 });

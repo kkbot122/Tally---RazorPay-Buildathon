@@ -14,12 +14,23 @@ export interface ReasoningModelAdapter {
 
 export type ReasoningAdapterErrorCode = "AI_REQUEST_ERROR" | "AI_SCHEMA_ERROR";
 
+export type ReasoningAdapterDiagnostics = {
+  provider: "openai" | "nvidia" | "gemini";
+  model?: string;
+  category?: "TIMEOUT" | "RATE_LIMIT" | "AUTHENTICATION" | "VALIDATION" | "SERVER" | "UNKNOWN";
+  status?: number;
+  durationMs?: number;
+};
+
 export class ReasoningAdapterError extends Error {
   readonly code: ReasoningAdapterErrorCode;
 
-  constructor(code: ReasoningAdapterErrorCode, message: string, options?: { cause?: unknown }) {
+  readonly diagnostics?: ReasoningAdapterDiagnostics;
+
+  constructor(code: ReasoningAdapterErrorCode, message: string, options?: { cause?: unknown; diagnostics?: ReasoningAdapterDiagnostics }) {
     super(message, options);
     this.name = "ReasoningAdapterError";
     this.code = code;
+    this.diagnostics = options?.diagnostics;
   }
 }

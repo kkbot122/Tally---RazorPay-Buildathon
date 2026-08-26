@@ -6,7 +6,7 @@ import type {
 } from "@tally/contracts";
 
 import type { UsedRecordState } from "../compatibility/index.js";
-import type { ReasoningModelAdapter } from "../agent/index.js";
+import type { ReasoningAdapterDiagnostics, ReasoningModelAdapter } from "../agent/index.js";
 import type { DeterministicRuleId } from "../deterministic/index.js";
 import type { RecordedTraceEvent } from "../trace/index.js";
 
@@ -29,7 +29,7 @@ export type RunReconciliationInput = {
     proposedLedgerRecordIds: string[];
     failureCodes: string[];
   }) => void;
-  onModelFailure?: (event: { runId: string; caseId: string; failureCode: string }) => void;
+  onModelFailure?: (event: { runId: string; caseId: string; failureCode: string; diagnostics?: ReasoningAdapterDiagnostics }) => void;
 };
 
 export type ReconciliationOperationalErrorCode = "AI_SCHEMA_ERROR";
