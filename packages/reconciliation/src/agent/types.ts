@@ -4,6 +4,8 @@ export type ReasoningModelInput = {
   input: string;
   /** Feedback from the authoritative verifier for a bounded repair attempt. */
   retryFeedback?: string;
+  /** Cancels provider work when the run deadline or user cancellation fires. */
+  signal?: AbortSignal;
 };
 
 export interface ReasoningModelAdapter {

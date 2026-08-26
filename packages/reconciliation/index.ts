@@ -108,6 +108,7 @@ export {
   RECONCILIATION_AGENT_INSTRUCTIONS,
   ReasoningAdapterError,
 } from "./src/agent/index.js";
+export { ReconciliationRunAbortedError } from "./src/pipeline/types.js";
 export type {
   OpenAIResponsesAdapterOptions,
   NvidiaChatCompletionsAdapterOptions,
@@ -115,6 +116,7 @@ export type {
   ReasoningModelAdapter,
   ReasoningModelInput,
 } from "./src/agent/index.js";
+export type { ReconciliationRunAbortCode } from "./src/pipeline/types.js";
 export type { BuildReasoningPromptInput, ReasoningPrimary } from "./src/agent/index.js";
 
 export { verifyMatchProposal, verifyNonMatchProposal } from "./src/verifier/index.js";

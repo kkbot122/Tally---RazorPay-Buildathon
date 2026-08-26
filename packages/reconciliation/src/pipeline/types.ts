@@ -18,6 +18,8 @@ export type RunReconciliationInput = {
   usedRecords?: UsedRecordState;
   modelAdapter: ReasoningModelAdapter;
   reasoningConcurrency?: number;
+  /** Aborts provider work and terminates the run when the operational budget is exhausted. */
+  signal?: AbortSignal;
   /** Test hook only; production runs use the recorder's default clock. */
   clock?: () => Date;
   onVerificationFailure?: (event: {
@@ -31,6 +33,18 @@ export type RunReconciliationInput = {
 };
 
 export type ReconciliationOperationalErrorCode = "AI_SCHEMA_ERROR";
+
+export type ReconciliationRunAbortCode = "RUN_CANCELLED" | "RUN_DEADLINE_EXCEEDED";
+
+export class ReconciliationRunAbortedError extends Error {
+  readonly code: ReconciliationRunAbortCode;
+
+  constructor(code: ReconciliationRunAbortCode) {
+    super(code === "RUN_CANCELLED" ? "The reconciliation run was cancelled." : "The reconciliation run exceeded its inference deadline.");
+    this.name = "ReconciliationRunAbortedError";
+    this.code = code;
+  }
+}
 
 /** A model proposal violated the runtime relationship contract. */
 export class ReconciliationOperationalError extends Error {

@@ -12,9 +12,10 @@ describe("API environment configuration", () => {
       OPENAI_MODEL: "gpt-5.6-terra",
       AI_PROVIDER: "openai",
       AI_REASONING_EFFORT: "none",
-      AI_REQUEST_TIMEOUT_MS: 60000,
+      AI_REQUEST_TIMEOUT_MS: 12000,
       AI_MAX_RETRIES: 0,
-      AI_REASONING_CONCURRENCY: 2,
+      AI_REASONING_CONCURRENCY: 8,
+      AI_RUN_DEADLINE_MS: 90000,
       WEB_ORIGIN: "http://localhost:3000",
     });
   });
@@ -28,7 +29,7 @@ describe("API environment configuration", () => {
         OPENAI_MODEL: "test-model",
         WEB_ORIGIN: "https://web.example",
       }),
-    ).toMatchObject({ PORT: 4000, OPENAI_MODEL: "test-model", AI_PROVIDER: "openai", AI_REASONING_EFFORT: "none", AI_REASONING_CONCURRENCY: 2 });
+    ).toMatchObject({ PORT: 4000, OPENAI_MODEL: "test-model", AI_PROVIDER: "openai", AI_REASONING_EFFORT: "none", AI_REASONING_CONCURRENCY: 8, AI_RUN_DEADLINE_MS: 90000 });
 
     expect(() => EnvSchema.parse({ PORT: "70000" })).toThrow();
     expect(() => EnvSchema.parse({ WEB_ORIGIN: "not-a-url" })).toThrow();

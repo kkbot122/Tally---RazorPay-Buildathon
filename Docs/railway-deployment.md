@@ -33,11 +33,19 @@ Required Railway variables:
 - `AI_PROVIDER=openai` (use `nvidia` with an NVIDIA API key)
 - `AI_BASE_URL` (optional; use `https://integrate.api.nvidia.com/v1` for NVIDIA)
 - `AI_REASONING_EFFORT=none` for structured proposal output
+- `AI_REQUEST_TIMEOUT_MS=12000` to bound an individual provider request
+- `AI_MAX_RETRIES=0` to avoid multiplying the inference tail
+- `AI_REASONING_CONCURRENCY=8` as the initial bounded production setting
+- `AI_RUN_DEADLINE_MS=90000` as the maximum run-level inference budget
 - `WEB_ORIGIN=https://<web-public-domain>`
 
 For NVIDIA’s hosted OpenAI-compatible API, set `AI_PROVIDER=nvidia`, `AI_BASE_URL=https://integrate.api.nvidia.com/v1`, `OPENAI_API_KEY=<NVIDIA API key>`, `OPENAI_MODEL=nvidia/nemotron-3.5-lightning-30b-a3b`, and `AI_REASONING_EFFORT=none`. The application uses NVIDIA’s `/v1/chat/completions` path, sends Nemotron’s documented `chat_template_kwargs.enable_thinking` option, and validates the returned proposal against the shared contract.
 
 The API listens on Railway’s `PORT` and binds to `0.0.0.0`. `/health` is liveness-only; `/health/db` is available for database diagnostics and is not the deployment healthcheck.
+
+The dashboard can cancel an active run through `POST /api/runs/:runId/cancel`.
+An expired run budget is recorded as a terminal operational failure rather than
+remaining indefinitely in `PROCESSING`.
 
 ## PostgreSQL service
 

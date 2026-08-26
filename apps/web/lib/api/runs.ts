@@ -67,6 +67,10 @@ export function getRun(runId: string): Promise<RunSummary> {
   return request<RunSummary>(`/api/runs/${encodeURIComponent(runId)}`);
 }
 
+export function cancelRun(runId: string): Promise<{ status: "CANCEL_REQUESTED" }> {
+  return request<{ status: "CANCEL_REQUESTED" }>(`/api/runs/${encodeURIComponent(runId)}/cancel`, { method: "POST" });
+}
+
 export function getRunResults(runId: string): Promise<RunResult[]> {
   return request<RunResult[]>(`/api/runs/${encodeURIComponent(runId)}/results`);
 }

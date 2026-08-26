@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createRun, getRun, getRunResults, getRunTrace } from "./runs";
+import { cancelRun, createRun, getRun, getRunResults, getRunTrace } from "./runs";
 
 describe("runtime run API client", () => {
   afterEach(() => vi.unstubAllGlobals());
@@ -35,6 +35,14 @@ describe("runtime run API client", () => {
 
     expect(fetchMock).toHaveBeenCalledWith("/api/runs/run-test/trace", expect.anything());
     expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual(["/api/runs/run-test/trace"]);
+  });
+
+  it("posts a cancellation request for an active run", async () => {
+    const fetchMock = vi.fn<(input: string, init?: RequestInit) => Promise<Response>>(async () => new Response(JSON.stringify({ status: "CANCEL_REQUESTED" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(cancelRun("run/cancel")).resolves.toEqual({ status: "CANCEL_REQUESTED" });
+    expect(fetchMock).toHaveBeenCalledWith("/api/runs/run%2Fcancel/cancel", expect.objectContaining({ method: "POST" }));
   });
 
   it("preserves only the sanitized error code and message from a failed API response", async () => {

@@ -5,6 +5,7 @@ import {
   runReconciliation,
   ReasoningAdapterError,
   ReconciliationOperationalError,
+  ReconciliationRunAbortedError,
   type ReasoningModelAdapter,
   type ReconciliationRunResult,
 } from "@tally/reconciliation";
@@ -36,6 +37,7 @@ export interface ReconciliationRunService {
   getResult(runId: string, caseId: string): Promise<unknown | undefined>;
   getExceptions(runId: string): Promise<unknown[] | undefined>;
   getTrace(runId: string): Promise<unknown[] | undefined>;
+  cancelRun(runId: string): Promise<boolean>;
 }
 
 export class TraceUnavailableError extends Error {
@@ -76,8 +78,12 @@ export function createReconciliationRunService(
   reasoningConcurrency = 2,
   onRunFailure?: (event: { runId: string; failureCode: string; traceEventCount: number; failurePersistenceFailed?: boolean }) => void,
   onModelFailure?: Parameters<typeof runReconciliation>[0]["onModelFailure"],
+  runDeadlineMs = 90_000,
 ): ReconciliationRunService {
-  async function executeRun(runId: string, request: CreateRunRequest): Promise<void> {
+  const controllers = new Map<string, AbortController>();
+
+  async function executeRun(runId: string, request: CreateRunRequest, controller: AbortController): Promise<void> {
+    const deadline = setTimeout(() => controller.abort("RUN_DEADLINE_EXCEEDED"), runDeadlineMs);
     try {
       const result = await pipeline({
         runId,
@@ -88,6 +94,7 @@ export function createReconciliationRunService(
         reasoningConcurrency,
         onVerificationFailure,
         onModelFailure,
+        signal: controller.signal,
       });
       try {
         await repository.saveCompletedRun(toPersistenceInput(request.asOfDate, result));
@@ -105,6 +112,9 @@ export function createReconciliationRunService(
       } catch {
         onRunFailure?.({ runId, failureCode: code, traceEventCount: persistedTrace.length, failurePersistenceFailed: true });
       }
+    } finally {
+      clearTimeout(deadline);
+      controllers.delete(runId);
     }
   }
 
@@ -118,8 +128,19 @@ export function createReconciliationRunService(
       parseLedgerCsv(validatedRequest.ledgerCsv);
       const runId = generateRunId();
       await repository.startRun({ runId, asOfDate: validatedRequest.asOfDate });
-      schedule(() => executeRun(runId, validatedRequest));
+      const controller = new AbortController();
+      controllers.set(runId, controller);
+      schedule(() => executeRun(runId, validatedRequest, controller));
       return { runId, status: "PROCESSING" as const };
+    },
+    async cancelRun(runId) {
+      const controller = controllers.get(runId);
+      if (controller === undefined || controller.signal.aborted) return false;
+      controller.abort("RUN_CANCELLED");
+      // Remove it immediately so a scheduler that never starts the queued
+      // task cannot retain controllers for abandoned runs.
+      controllers.delete(runId);
+      return true;
     },
     async getSummary(runId) {
       const run = await repository.getRunById(runId);
@@ -173,7 +194,7 @@ export function createReconciliationRunService(
 }
 
 function failureCode(error: unknown): string {
-  if (error instanceof ReasoningAdapterError || error instanceof ReconciliationOperationalError) return error.code;
+  if (error instanceof ReconciliationRunAbortedError || error instanceof ReasoningAdapterError || error instanceof ReconciliationOperationalError) return error.code;
   return "SYSTEM_ERROR";
 }
 

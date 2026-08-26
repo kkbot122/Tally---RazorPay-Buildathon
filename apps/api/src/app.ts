@@ -77,6 +77,7 @@ export function buildApp(
     config.AI_REASONING_CONCURRENCY ?? DEFAULT_REASONING_CONCURRENCY,
     (event) => app.log.error(event, event.failurePersistenceFailed ? "run failure persistence failed" : "reconciliation run failed"),
     (event) => app.log.warn(event, "model request failed"),
+    config.AI_RUN_DEADLINE_MS,
   ));
   const benchmarkEvaluationService = evaluationService ?? (database.db === undefined ? undefined : createBenchmarkEvaluationService(
       createReconciliationRunRepository(database.db),
@@ -157,6 +158,12 @@ export function buildApp(
     if (runService === undefined) return reply.code(503).send({ error: "SERVICE_UNAVAILABLE", message: "The reconciliation service is unavailable." });
     const summary = await runService.getSummary((request.params as { runId: string }).runId);
     return summary === undefined ? reply.code(404).send({ error: "RUN_NOT_FOUND", message: "Run not found." }) : summary;
+  });
+
+  app.post("/api/runs/:runId/cancel", async (request, reply) => {
+    if (runService === undefined) return reply.code(503).send({ error: "SERVICE_UNAVAILABLE", message: "The reconciliation service is unavailable." });
+    const cancelled = await runService.cancelRun((request.params as { runId: string }).runId);
+    return cancelled ? { status: "CANCEL_REQUESTED" as const } : reply.code(409).send({ error: "RUN_NOT_PROCESSING", message: "The run is no longer processing." });
   });
 
   app.get("/api/runs/:runId/results", async (request, reply) => {

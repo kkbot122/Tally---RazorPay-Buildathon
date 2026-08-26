@@ -10,7 +10,7 @@ import { normalizeCounterpartyForExactComparison, normalizeCurrency, normalizeDa
 import { parseBankCsv, parseLedgerCsv } from "../parsing/index.js";
 import { verifyMatchProposal, verifyNonMatchProposal, type MatchVerificationResult, type NonMatchVerificationResult } from "../verifier/index.js";
 import { createTraceRecorder, type TraceRecorder } from "../trace/index.js";
-import { type FinalReconciliationResult, type ReconciliationRunResult, type RunReconciliationInput } from "./types.js";
+import { ReconciliationRunAbortedError, type FinalReconciliationResult, type ReconciliationRunResult, type RunReconciliationInput } from "./types.js";
 
 export const DEFAULT_REASONING_CONCURRENCY = 5;
 
@@ -122,6 +122,7 @@ export async function runReconciliation(input: RunReconciliationInput): Promise<
 
   const limit = pLimit(reasoningConcurrency);
   for (let waveStart = 0; waveStart < reasoningDecisions.length; waveStart += reasoningConcurrency) {
+    throwIfAborted(input.signal);
     const waveDecisions = reasoningDecisions.slice(waveStart, waveStart + reasoningConcurrency);
     const waveSnapshot = cloneUsedRecords(usedRecords);
     const preparedItems: PreparedReasoningItem[] = [];
@@ -174,8 +175,9 @@ export async function runReconciliation(input: RunReconciliationInput): Promise<
         },
       });
       try {
-        return await generateProposalWithVerifierRetry(item, input.modelAdapter, records, input.asOfDate, waveSnapshot, trace);
+        return await generateProposalWithVerifierRetry(item, input.modelAdapter, records, input.asOfDate, waveSnapshot, trace, input.signal);
       } catch (error) {
+        if (input.signal?.aborted) throw new ReconciliationRunAbortedError(abortReason(input.signal));
         if (!(error instanceof ReasoningAdapterError) || (error.code !== "AI_SCHEMA_ERROR" && error.code !== "AI_REQUEST_ERROR")) throw error;
         input.onModelFailure?.({ runId: input.runId, caseId: item.caseId, failureCode: error.code });
         const fallback = insufficientEvidenceProposal(item.primary, error.code);
@@ -197,6 +199,14 @@ export async function runReconciliation(input: RunReconciliationInput): Promise<
 
   trace.record({ type: "RUN_COMPLETED", payload: { casesProcessed: results.length } });
   return { runId: input.runId, results, usedRecords, trace: trace.getEvents() };
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) throw new ReconciliationRunAbortedError(abortReason(signal));
+}
+
+function abortReason(signal: AbortSignal): "RUN_CANCELLED" | "RUN_DEADLINE_EXCEEDED" {
+  return signal.reason === "RUN_CANCELLED" ? "RUN_CANCELLED" : "RUN_DEADLINE_EXCEEDED";
 }
 
 function validateReasoningConcurrency(value: number | undefined): number {
@@ -265,8 +275,9 @@ async function generateProposalWithVerifierRetry(
   asOfDate: string,
   usedRecords: UsedRecordState,
   trace: TraceRecorder,
+  signal?: AbortSignal,
 ): Promise<AgentProposal> {
-  let proposal = await modelAdapter.generateProposal(item.promptInput);
+  let proposal = await modelAdapter.generateProposal({ ...item.promptInput, signal });
   trace.record({ type: "AGENT_PROPOSED", caseId: item.caseId, payload: proposal });
 
   for (let attempt = 0; attempt < 1; attempt += 1) {
@@ -280,6 +291,7 @@ async function generateProposalWithVerifierRetry(
     proposal = await modelAdapter.generateProposal({
       ...item.promptInput,
       retryFeedback: JSON.stringify({ caseId: item.caseId, proposedBankRecordIds: proposal.bankRecordIds, proposedLedgerRecordIds: proposal.ledgerRecordIds, verifierFailures: feedback }),
+      signal,
     });
     trace.record({ type: "AGENT_PROPOSED", caseId: item.caseId, payload: proposal });
   }

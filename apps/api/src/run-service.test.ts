@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { ReconciliationRunResult, ReasoningModelAdapter } from "@tally/reconciliation";
+import { ReconciliationRunAbortedError, type ReconciliationRunResult, type ReasoningModelAdapter } from "@tally/reconciliation";
 
 import { createReconciliationRunService, RunFailedError, type CreateRunRequest } from "./run-service.js";
 import type { ReconciliationRunRepository } from "./db/reconciliation-run-repository.js";
@@ -47,6 +47,10 @@ function controlledScheduler() {
     run: async () => {
       if (task === undefined) throw new Error("expected a scheduled run");
       await task();
+    },
+    start: () => {
+      if (task === undefined) throw new Error("expected a scheduled run");
+      return task();
     },
   };
 }
@@ -110,5 +114,39 @@ describe("reconciliation run service", () => {
     await expect(service.getSummary("run-failed")).resolves.toMatchObject({ runId: "run-failed", status: "FAILED", totalCases: 0 });
     await expect(service.getResults("run-failed")).rejects.toBeInstanceOf(RunFailedError);
     await expect(service.getExceptions("run-failed")).rejects.toBeInstanceOf(RunFailedError);
+  });
+
+  it("marks a run failed when its inference deadline aborts the pipeline", async () => {
+    const runPipeline = vi.fn(async ({ signal }: { signal?: AbortSignal }) => {
+      await new Promise<void>((_, reject) => signal?.addEventListener("abort", () => reject(new ReconciliationRunAbortedError(signal.reason === "RUN_CANCELLED" ? "RUN_CANCELLED" : "RUN_DEADLINE_EXCEEDED")), { once: true }));
+      return result("run-deadline");
+    });
+    const repo = repository();
+    const scheduler = controlledScheduler();
+    const service = createReconciliationRunService(repo, adapter, runPipeline as typeof import("@tally/reconciliation").runReconciliation, () => "run-deadline", undefined, scheduler.schedule, 2, undefined, undefined, 10);
+
+    await service.createRun(request());
+    await scheduler.run();
+
+    expect(repo.markRunFailed).toHaveBeenCalledWith("run-deadline", "RUN_DEADLINE_EXCEEDED", expect.any(Array));
+  });
+
+  it("cancels in-flight model work when the user stops a run", async () => {
+    const runPipeline = vi.fn(async ({ signal }: { signal?: AbortSignal }) => {
+      await new Promise<void>((_, reject) => signal?.addEventListener("abort", () => reject(new ReconciliationRunAbortedError("RUN_CANCELLED")), { once: true }));
+      return result("run-cancel");
+    });
+    const repo = repository();
+    const scheduler = controlledScheduler();
+    const service = createReconciliationRunService(repo, adapter, runPipeline as typeof import("@tally/reconciliation").runReconciliation, () => "run-cancel", undefined, scheduler.schedule, 2, undefined, undefined, 90_000);
+
+    await service.createRun(request());
+    const execution = scheduler.start();
+    await Promise.resolve();
+    await expect(service.cancelRun("run-cancel")).resolves.toBe(true);
+    await execution;
+    await expect(service.cancelRun("run-cancel")).resolves.toBe(false);
+
+    expect(repo.markRunFailed).toHaveBeenCalledWith("run-cancel", "RUN_CANCELLED", expect.any(Array));
   });
 });

@@ -17,9 +17,10 @@ const config = {
   OPENAI_MODEL: "gpt-5.6-terra",
   AI_PROVIDER: "openai" as const,
   AI_REASONING_EFFORT: "none" as const,
-  AI_REQUEST_TIMEOUT_MS: 60000,
+  AI_REQUEST_TIMEOUT_MS: 12000,
   AI_MAX_RETRIES: 0,
-  AI_REASONING_CONCURRENCY: 2,
+  AI_REASONING_CONCURRENCY: 8,
+  AI_RUN_DEADLINE_MS: 90000,
   WEB_ORIGIN: "http://localhost:3000",
 };
 
@@ -47,6 +48,7 @@ function createTestService(overrides: Partial<ReconciliationRunService> = {}): R
     getResult: async (_runId, caseId) => ({ caseId }),
     getExceptions: async () => [{ caseId: "BANK:B2", finalOutcome: "DISCREPANCY" }],
     getTrace: async () => [{ sequenceNo: 1 }, { sequenceNo: 2 }],
+    cancelRun: async () => true,
     ...overrides,
   };
 }
@@ -401,6 +403,16 @@ describe("reconciliation routes", () => {
     expect(summary.json()).toMatchObject({ runId: "run-api-001", status: "FAILED" });
     expect(results.statusCode).toBe(500);
     expect(results.json()).toEqual({ error: "RUN_FAILED", message: "This reconciliation run failed and has no finance results." });
+    await app.close();
+  });
+
+  it("forwards a stop request to the run service", async () => {
+    const cancelRun = vi.fn(async () => true);
+    const app = buildApp(config, createTestDatabase(), createTestService({ cancelRun }));
+    const response = await app.inject({ method: "POST", url: "/api/runs/run-api-001/cancel" });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ status: "CANCEL_REQUESTED" });
+    expect(cancelRun).toHaveBeenCalledWith("run-api-001");
     await app.close();
   });
 

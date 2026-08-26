@@ -4,7 +4,7 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import React from "react";
 import type { FinalOutcome } from "@tally/contracts";
 
-import { createRun, getRun, getRunResults, type RunResult, type RunSummary } from "../lib/api/runs";
+import { cancelRun, createRun, getRun, getRunResults, type RunResult, type RunSummary } from "../lib/api/runs";
 import { createSubmissionLock, filterResults, isRunFormComplete, summarizeResults } from "../lib/dashboard-model";
 import ResultDetailSheet from "./result-detail-sheet";
 
@@ -165,6 +165,17 @@ export default function Dashboard() {
     }
   }
 
+  async function stopRun() {
+    if (activeRunId === null) return;
+    setStatusMessage("Cancellation requested…");
+    try {
+      await cancelRun(activeRunId);
+    } catch (cancelFailure) {
+      setReadError(cancelFailure instanceof Error ? cancelFailure.message : "The run could not be cancelled.");
+      setReadErrorCode(errorCode(cancelFailure));
+    }
+  }
+
   async function runReconciliation(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!isRunFormComplete(bankFile, ledgerFile, asOfDate)) {
@@ -240,7 +251,10 @@ export default function Dashboard() {
             <label className="grid min-w-0 gap-1.5" htmlFor="bank-file"><span className={fieldLabel}>Bank transactions CSV</span><input id="bank-file" className={`${control} p-1.5 text-[13px] file:mr-2 file:rounded-[3px] file:border file:border-tally-border file:bg-tally-surface-subtle file:px-2 file:py-[5px] file:text-tally-ink-secondary`} type="file" accept=".csv,text/csv" onChange={(event) => selectCsvFile(event.target.files?.[0], "bank")} /><span className="min-h-[18px] text-xs text-tally-ink-muted">{bankFile?.name ?? "No file selected"}</span></label>
             <label className="grid min-w-0 gap-1.5" htmlFor="ledger-file"><span className={fieldLabel}>Ledger transactions CSV</span><input id="ledger-file" className={`${control} p-1.5 text-[13px] file:mr-2 file:rounded-[3px] file:border file:border-tally-border file:bg-tally-surface-subtle file:px-2 file:py-[5px] file:text-tally-ink-secondary`} type="file" accept=".csv,text/csv" onChange={(event) => selectCsvFile(event.target.files?.[0], "ledger")} /><span className="min-h-[18px] text-xs text-tally-ink-muted">{ledgerFile?.name ?? "No file selected"}</span></label>
             <label className="grid min-w-0 gap-1.5" htmlFor="as-of-date"><span className={fieldLabel}>As-of date</span><input id="as-of-date" className={control} type="date" value={asOfDate} onChange={(event) => setAsOfDate(event.target.value)} /><span className="min-h-[18px] text-xs text-tally-ink-muted">Required</span></label>
-            <button className="min-h-[38px] whitespace-nowrap rounded border border-tally-accent bg-tally-accent px-[14px] py-2 font-semibold text-white hover:bg-tally-accent/90 disabled:cursor-not-allowed disabled:opacity-[.55] sm:w-max lg:w-auto" type="submit" disabled={isRunning || bankFile === null || ledgerFile === null || asOfDate === ""}>{isRunning ? "Running…" : "Run reconciliation"}</button>
+            <div className="flex gap-2 sm:w-max lg:w-auto">
+              <button className="min-h-[38px] whitespace-nowrap rounded border border-tally-accent bg-tally-accent px-[14px] py-2 font-semibold text-white hover:bg-tally-accent/90 disabled:cursor-not-allowed disabled:opacity-[.55] sm:w-max lg:w-auto" type="submit" disabled={isRunning || bankFile === null || ledgerFile === null || asOfDate === ""}>{isRunning ? "Running…" : "Run reconciliation"}</button>
+              {isRunning && activeRunId !== null && <button className={secondaryButton} type="button" onClick={() => void stopRun()}>Stop run</button>}
+            </div>
           </div>
           {statusMessage !== null && <p className="mt-[14px] text-tally-ink-secondary" role="status">{statusMessage}</p>}
           {error !== null && <p className="mt-[14px] border-l-[3px] border-tally-danger bg-tally-danger-soft px-3 py-2.5 text-tally-danger" role="alert">{error}</p>}

@@ -10,6 +10,7 @@ const api = vi.hoisted(() => ({
   createRun: vi.fn(),
   getRun: vi.fn(),
   getRunResults: vi.fn(),
+  cancelRun: vi.fn(),
 }));
 
 vi.mock("../lib/api/runs", () => api);
@@ -43,6 +44,7 @@ beforeEach(() => {
   api.createRun.mockResolvedValue({ runId: "run_001", status: "COMPLETED" });
   api.getRun.mockResolvedValue(completedSummary());
   api.getRunResults.mockResolvedValue(resultSet);
+  api.cancelRun.mockResolvedValue({ status: "CANCEL_REQUESTED" });
 });
 
 afterEach(() => {
@@ -80,6 +82,17 @@ describe("T030 dashboard workflows", () => {
     await waitFor(() => expect(screen.getByText("FAILED")).toBeTruthy());
     expect(screen.getByText(/failed operationally/)).toBeTruthy();
     expect(api.getRunResults).not.toHaveBeenCalled();
+  });
+
+  it("cancels a processing run from the dashboard", async () => {
+    api.createRun.mockResolvedValueOnce({ runId: "run_cancel", status: "PROCESSING" });
+    api.getRun.mockImplementation(() => new Promise(() => {}));
+    render(<Dashboard />);
+    fillForm();
+    fireEvent.submit(screen.getByRole("button", { name: "Run reconciliation" }).closest("form")!);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Stop run" })).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Stop run" }));
+    await waitFor(() => expect(api.cancelRun).toHaveBeenCalledWith("run_cancel"));
   });
 
   it("turns two immediate submissions into one POST and sends File.text contents", async () => {

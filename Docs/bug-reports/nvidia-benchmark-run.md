@@ -1,6 +1,6 @@
 # Bug Report — NVIDIA benchmark runs do not return results to the browser
 
-**Status:** Implemented locally; production verification pending  
+**Status:** Bounded-latency fix implemented locally; production verification pending
 **Date:** 2026-08-26  
 **Area:** API run execution, NVIDIA inference, Railway networking, dashboard submission flow  
 **Severity:** High — the primary benchmark workflow is not usable in production
@@ -288,9 +288,116 @@ For run `run_41873010-a204-4818-a6b0-1d9aabcf0aec`:
 - Failure-persistence errors are logged with run ID and sanitized codes.
 - A dashboard poll transitions visibly from `PROCESSING` to `FAILED`.
 
+## Follow-up incident: bounded inference latency
+
+### User report
+
+After the failure-state fix was deployed, a benchmark run was stopped from
+the browser after more than ten minutes without output. A second run using the
+development fixture remained in `PROCESSING` for more than five minutes. The
+required product limit is one to two minutes for a terminal result.
+
+### New production evidence
+
+- Railway migrations completed successfully before the API started; the
+  database is not the current bottleneck.
+- Run `run_3052c561-5532-48d3-83c8-ee63cfe0a16b` was submitted at approximately
+  `15:55:05Z`. Its first `AI_REQUEST_ERROR` appeared at `15:57:29Z`, with
+  additional model failures and verifier rejections continuing for several
+  minutes. No terminal completion was visible in the captured logs.
+- Run `run_92602423-036d-4afd-83e1-e80a85cb2729` was submitted at approximately
+  `16:07:30Z` and was still being polled at `16:09:38Z`.
+- Status GET requests completed in approximately 3–12 ms, so database reads,
+  polling, and the API health path are not causing the multi-minute delay.
+- Stopping the first browser run did not cancel its background execution. The
+  server continued processing its model queue.
+
+### Root cause
+
+The API currently processes reasoning cases in serialized waves. Railway is
+configured with `AI_REASONING_CONCURRENCY=2` and `AI_REQUEST_TIMEOUT_MS=60000`.
+The pipeline waits for each wave before starting the next one, and verifier
+repair can add another model request for a rejected proposal.
+
+The resulting worst-case shape is:
+
+```text
+number of reasoning cases ÷ 2 × 60 seconds
+```
+
+Twenty reasoning cases can therefore take approximately ten minutes before
+repair attempts or normal provider latency are included. A 100-case benchmark
+can take substantially longer. This is why increasing the browser polling
+frequency or changing the database will not solve the latency target.
+
+### Ranked hypotheses
+
+1. **Serialized inference waves are the primary cause.** If concurrency is
+   increased and the request deadline is reduced, the same fixture should
+   reach a terminal result within the target window.
+2. **NVIDIA request stalls are the second cause.** If a request is bounded to a
+   10–15 second timeout, one stalled provider call should produce an unresolved
+   case instead of blocking a wave for 60 seconds.
+3. **Verifier repair increases tail latency.** If repair attempts are counted
+   and capped, rejected proposals should no longer multiply the slowest-case
+   duration.
+4. **The lack of cancellation causes resource contention.** If stopping a run
+   cancels its server-side work, a subsequent run should not compete with the
+   abandoned run for provider capacity.
+
+### Planned change
+
+#### Immediate production configuration
+
+- Set `AI_REASONING_CONCURRENCY` to `8` initially, then tune against NVIDIA
+  rate limits and observed latency.
+- Set `AI_REQUEST_TIMEOUT_MS` to `10000`–`15000`.
+- Keep `AI_MAX_RETRIES=0` while meeting the buildathon latency target.
+
+These values are a bounded first configuration, not a guarantee that every
+provider call will succeed. A timed-out or unavailable case must safely become
+`UNRESOLVED`.
+
+#### Code-level deadline and cancellation
+
+- Add a run-level inference budget of approximately 90 seconds.
+- Propagate cancellation through the run service and model adapter so queued
+  and in-flight work can stop when the run is cancelled or its deadline is
+  reached.
+- Enforce the run budget and persist a terminal `FAILED` result with the
+  sanitized code `RUN_DEADLINE_EXCEEDED` when the budget expires. This is an
+  operational failure, so no partial finance result is exposed as complete.
+  A later iteration can add partial-result persistence without weakening this
+  safety boundary.
+- Add a cancellation endpoint and a dashboard stop action that cancel server
+  work rather than only stopping browser polling.
+- Record per-request duration, attempt, model, outcome, and sanitized failure
+  code so latency budgets can be verified from Railway logs.
+
+#### Output and architecture
+
+The run remains asynchronous. The dashboard continues polling the run status,
+but the backend is no longer allowed to wait indefinitely for the full AI
+queue. Incremental result persistence can be added after the bounded terminal
+path is working; it is not required to enforce the one-to-two-minute limit.
+
+### Latency acceptance criteria
+
+- Dev fixtures reach a terminal `COMPLETED` or `FAILED` state within 60
+  seconds under normal provider conditions.
+- The benchmark reaches a terminal `FAILED` state within 120 seconds when the
+  provider budget is exhausted; it must never remain `PROCESSING` indefinitely
+  or expose partial finance results as complete.
+- No single model request blocks longer than the configured request timeout.
+- A stopped run does not continue consuming model capacity.
+- The UI receives visible progress and a terminal outcome even when NVIDIA is
+  slow or unavailable; the terminal error clearly distinguishes an operational
+  timeout from a finance decision.
+
 ## Implementation boundary
 
-The fix is implemented locally. The remaining verification step is to apply the
+The failure-state fix is deployed. The bounded-latency fix is implemented
+locally; the remaining verification step is to apply the
 database migration in Railway, deploy the API and web services, and run a real
 benchmark upload while checking that the browser receives the initial run ID
 promptly and that the persisted status reaches `COMPLETED` or a visible

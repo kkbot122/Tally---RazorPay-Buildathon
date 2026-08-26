@@ -37,6 +37,7 @@ export class OpenAIResponsesAdapter implements ReasoningModelAdapter {
       response = await this.client.parse({
         model: this.model,
         input: input.retryFeedback === undefined ? input.input : `${input.input}\n\nVERIFIER FEEDBACK FOR THIS REPAIR ATTEMPT:\n${input.retryFeedback}`,
+        signal: input.signal,
         text: {
           format: zodTextFormat(AgentProposalForModelSchema, "agent_proposal"),
         },
