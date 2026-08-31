@@ -19,7 +19,7 @@ export const EnvSchema = z.object({
 });
 
 export const DEFAULT_NVIDIA_MODEL = "nvidia/nemotron-3.5-lightning-30b-a3b";
-export const DEFAULT_GROQ_MODEL = "llama-3.3-70b-versatile";
+export const DEFAULT_GROQ_MODEL = "openai/gpt-oss-120b";
 
 export type AppConfig = z.infer<typeof EnvSchema>;
 

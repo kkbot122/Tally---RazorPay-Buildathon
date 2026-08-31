@@ -93,7 +93,7 @@ describe("OpenAICompatibleChatCompletionsAdapter", () => {
         { role: "user", content: "input" },
       ],
       response_format: { type: "json_object" },
-      max_tokens: 16384,
+      max_tokens: 2048,
     }));
   });
 

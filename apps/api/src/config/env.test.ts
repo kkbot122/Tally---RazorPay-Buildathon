@@ -44,9 +44,9 @@ describe("API environment configuration", () => {
   });
 
   it("selects the Groq default model and validates its production key", () => {
-    expect(loadConfig({ AI_PROVIDER: "groq" }).OPENAI_MODEL).toBe("llama-3.3-70b-versatile");
+    expect(loadConfig({ AI_PROVIDER: "groq" }).OPENAI_MODEL).toBe("openai/gpt-oss-120b");
     expect(() => loadConfig({ NODE_ENV: "production", AI_PROVIDER: "groq", DATABASE_URL: "postgresql://db.example/tally", WEB_ORIGIN: "https://web.example" })).toThrow(/GROQ_API_KEY/);
-    expect(loadConfig({ NODE_ENV: "production", AI_PROVIDER: "groq", GROQ_API_KEY: "groq-key", DATABASE_URL: "postgresql://db.example/tally", WEB_ORIGIN: "https://web.example" }).OPENAI_MODEL).toBe("llama-3.3-70b-versatile");
+    expect(loadConfig({ NODE_ENV: "production", AI_PROVIDER: "groq", GROQ_API_KEY: "groq-key", DATABASE_URL: "postgresql://db.example/tally", WEB_ORIGIN: "https://web.example" }).OPENAI_MODEL).toBe("openai/gpt-oss-120b");
   });
 
   it("requires a usable reasoning key in production", () => {

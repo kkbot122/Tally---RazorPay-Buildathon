@@ -9,7 +9,8 @@ import {
 } from "./types.js";
 
 export const DEFAULT_NVIDIA_REASONING_MODEL = "nvidia/nemotron-3.5-lightning-30b-a3b";
-export const DEFAULT_GROQ_REASONING_MODEL = "llama-3.3-70b-versatile";
+export const DEFAULT_GROQ_REASONING_MODEL = "openai/gpt-oss-120b";
+export const MAX_REASONING_COMPLETION_TOKENS = 2048;
 
 const NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1";
 const GROQ_BASE_URL = "https://api.groq.com/openai/v1";
@@ -72,7 +73,11 @@ export class OpenAICompatibleChatCompletionsAdapter implements ReasoningModelAda
           ],
           response_format: { type: "json_object" },
           temperature: 0,
-          max_tokens: 16384,
+          // Groq prefers max_completion_tokens; keep NVIDIA's established
+          // max_tokens shape while using the same small proposal budget.
+          ...(this.provider === "groq"
+            ? { max_completion_tokens: MAX_REASONING_COMPLETION_TOKENS }
+            : { max_tokens: MAX_REASONING_COMPLETION_TOKENS }),
           ...(this.provider === "nvidia" && this.model.startsWith("nvidia/nemotron-3.5-lightning")
             ? { chat_template_kwargs: { enable_thinking: this.reasoningEffort !== "none" } }
             : {}),
