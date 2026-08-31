@@ -28,4 +28,14 @@ describe("GroqRateLimiter", () => {
 
     await expect(limiter.reserve(1, controller.signal)).rejects.toBe("RUN_CANCELLED");
   });
+
+  it("atomically credits unused reserved tokens back for another concurrent request", async () => {
+    const store = new InMemoryGroqQuotaStateStore();
+    const limiter = new GroqRateLimiter(store, { requestsPerMinute: 10, tokensPerMinute: 8 }, "organization", () => 1_000);
+
+    const reservation = await limiter.reserve(6);
+    await limiter.settle(reservation, 3);
+
+    await expect(limiter.reserve(5)).resolves.toMatchObject({ tokens: 5 });
+  });
 });

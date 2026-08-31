@@ -25,6 +25,7 @@ export const DEFAULT_GROQ_QUOTA_SCOPE = "groq:organization";
 export type GroqReservation = {
   tokens: number;
   waitedMs: number;
+  minuteStartedAt: number;
 };
 
 const MINUTE_MS = 60_000;
@@ -62,7 +63,7 @@ export class GroqRateLimiter {
           result: { waitMs: 0 },
         };
       });
-      if (outcome.waitMs === 0) return { tokens, waitedMs };
+      if (outcome.waitMs === 0) return { tokens, waitedMs, minuteStartedAt: now };
       waitedMs += outcome.waitMs;
       await this.wait(outcome.waitMs, signal);
     }
@@ -75,6 +76,27 @@ export class GroqRateLimiter {
       state: { ...normalize(state, now), blockedUntil: Math.max(state.blockedUntil, now + waitMs) },
       result: undefined,
     }));
+  }
+
+  /**
+   * Replaces a conservative pre-request reservation with Groq's actual usage.
+   * The update is atomic, so replicas immediately share any returned capacity.
+   */
+  async settle(reservation: GroqReservation, actualTokens: number): Promise<void> {
+    if (!Number.isSafeInteger(actualTokens) || actualTokens < 1) return;
+    const adjustment = actualTokens - reservation.tokens;
+    if (adjustment === 0) return;
+    const now = this.now();
+    await this.store.update(this.scope, (stored) => {
+      const state = normalize(stored, now);
+      // A new quota minute has already discarded the original reservation.
+      // Never apply its adjustment to unrelated requests in the new minute.
+      if (state.minuteStartedAt !== reservation.minuteStartedAt) return { state, result: undefined };
+      return {
+        state: { ...state, tokensInMinute: Math.max(0, state.tokensInMinute + adjustment) },
+        result: undefined,
+      };
+    });
   }
 }
 

@@ -11,25 +11,17 @@ import { DEFAULT_GROQ_RATE_LIMIT, GroqRateLimiter, InMemoryGroqQuotaStateStore }
 
 export const DEFAULT_NVIDIA_REASONING_MODEL = "nvidia/nemotron-3.5-lightning-30b-a3b";
 export const DEFAULT_GROQ_REASONING_MODEL = "openai/gpt-oss-120b";
-export const MAX_GROQ_REASONING_COMPLETION_TOKENS = 2048;
+export const MAX_GROQ_REASONING_COMPLETION_TOKENS = 1536;
 export const MAX_NVIDIA_REASONING_COMPLETION_TOKENS = 16384;
 
 const NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1";
 const GROQ_BASE_URL = "https://api.groq.com/openai/v1";
 const PROPOSAL_FORMAT = `
-Return exactly one JSON object with these keys and no wrapper object:
-{
-  "proposedOutcome": "MATCH" | "TIMING_DIFFERENCE" | "DISCREPANCY" | "INSUFFICIENT_EVIDENCE",
-  "bankRecordIds": string[],
-  "ledgerRecordIds": string[],
-  "confidence": "HIGH" | "MEDIUM" | "LOW",
-  "evidence": [{ "statement": string, "source": "BANK_RECORD" | "LEDGER_RECORD" | "CROSS_RECORD" | "DETERMINISTIC", "kind": "REFERENCE" | "COUNTERPARTY" | "DESCRIPTION" | "BATCH" | "AMOUNT" | "DATE" | "GROUPING" | "SEMANTIC" | "DETERMINISTIC", "recordIds": string[] }],
-  "conflictingEvidence": [{ "statement": string, "source": "BANK_RECORD" | "LEDGER_RECORD" | "CROSS_RECORD" | "DETERMINISTIC", "kind": "REFERENCE" | "COUNTERPARTY" | "DESCRIPTION" | "BATCH" | "AMOUNT" | "DATE" | "GROUPING" | "SEMANTIC" | "DETERMINISTIC", "recordIds": string[] }],
-  "reason": string
-}
-Do not use snake_case keys. Do not put the proposal under another key. Evidence must be an array of objects, not strings.
-Evidence must contain at least one item, even for INSUFFICIENT_EVIDENCE. When there is no reliable support, use one explicit insufficiency item with source DETERMINISTIC, kind DETERMINISTIC, and the relevant supplied record IDs; do not return an empty evidence array.
-Every evidence and conflictingEvidence object must include a non-empty recordIds array containing the exact record IDs that support that specific statement. Never omit recordIds, and never put record IDs only in the top-level bankRecordIds or ledgerRecordIds fields.
+Return one JSON object only (no wrapper, no snake_case):
+{ proposedOutcome, bankRecordIds, ledgerRecordIds, confidence, evidence, conflictingEvidence, reason }.
+proposedOutcome is MATCH, TIMING_DIFFERENCE, DISCREPANCY, or INSUFFICIENT_EVIDENCE; confidence is HIGH, MEDIUM, or LOW.
+bankRecordIds and ledgerRecordIds are exact supplied IDs. evidence and conflictingEvidence are arrays of { statement, source, kind, recordIds }; source is BANK_RECORD, LEDGER_RECORD, CROSS_RECORD, or DETERMINISTIC; kind is REFERENCE, COUNTERPARTY, DESCRIPTION, BATCH, AMOUNT, DATE, GROUPING, SEMANTIC, or DETERMINISTIC.
+Every evidence item must have non-empty exact supporting recordIds. evidence is never empty: for insufficient evidence, include a DETERMINISTIC insufficiency item with the relevant IDs.
 `;
 
 type ChatCompletionsClient = Pick<OpenAI["chat"]["completions"], "create">;
@@ -77,7 +69,9 @@ export class OpenAICompatibleChatCompletionsAdapter implements ReasoningModelAda
       for (let attempt = 0; attempt < 2; attempt += 1) {
         const startedAt = Date.now();
         try {
-          if (this.provider === "groq") await this.groqRateLimiter!.reserve(estimateRequestTokens(instruction, input.retryFeedback), input.signal);
+          const reservation = this.provider === "groq"
+            ? await this.groqRateLimiter!.reserve(estimateRequestTokens(instruction, input.retryFeedback), input.signal)
+            : undefined;
           const request = {
           model: this.model,
           messages: [
@@ -95,7 +89,9 @@ export class OpenAICompatibleChatCompletionsAdapter implements ReasoningModelAda
             ? { chat_template_kwargs: { enable_thinking: this.reasoningEffort !== "none" } }
             : {}),
         };
-          return await this.client.create(request as never, { signal: input.signal });
+          const response = await this.client.create(request as never, { signal: input.signal });
+          if (reservation !== undefined) await this.groqRateLimiter!.settle(reservation, actualTokenUsage(response));
+          return response;
         } catch (error) {
           const classified = classifyProviderError(error);
           if (this.provider === "groq" && classified.status === 429 && attempt === 0) {
@@ -214,6 +210,14 @@ function estimateRequestTokens(instruction: string, retryFeedback: string | unde
   // Conservative character estimate: the configured completion ceiling is also
   // reserved because Groq enforces the combined prompt + completion budget.
   return Math.ceil((PROPOSAL_FORMAT.length + instruction.length + (retryFeedback?.length ?? 0)) / 3.5) + MAX_GROQ_REASONING_COMPLETION_TOKENS;
+}
+
+function actualTokenUsage(response: unknown): number {
+  if (response === null || typeof response !== "object" || !("usage" in response)) return 0;
+  const usage = response.usage;
+  if (usage === null || typeof usage !== "object" || !("total_tokens" in usage)) return 0;
+  const totalTokens = usage.total_tokens;
+  return typeof totalTokens === "number" && Number.isSafeInteger(totalTokens) && totalTokens > 0 ? totalTokens : 0;
 }
 
 function header(error: unknown, name: string): string | null {

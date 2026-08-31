@@ -214,13 +214,25 @@ describe("OpenAICompatibleChatCompletionsAdapter", () => {
   });
 
   it("sends Groq-compatible JSON requests with the configured model and cancellation", async () => {
-    const create = vi.fn().mockResolvedValue({ choices: [{ message: { content: JSON.stringify(proposal) } }] });
+    const create = vi.fn().mockResolvedValue({ choices: [{ message: { content: JSON.stringify(proposal) } }], usage: { total_tokens: 700 } });
     const signal = new AbortController().signal;
     const adapter = new OpenAICompatibleChatCompletionsAdapter({ provider: "groq", model: "groq-test", client: { create } as never });
 
     await expect(adapter.generateProposal({ input: "input", signal })).resolves.toEqual(proposal);
-    expect(create.mock.calls[0]![0]).toEqual(expect.objectContaining({ model: "groq-test", response_format: { type: "json_object" }, temperature: 0, max_completion_tokens: 2048 }));
+    expect(create.mock.calls[0]![0]).toEqual(expect.objectContaining({ model: "groq-test", response_format: { type: "json_object" }, temperature: 0, max_completion_tokens: 1536 }));
     expect((create.mock.calls[0]![0] as Record<string, unknown>).chat_template_kwargs).toBeUndefined();
     expect(create.mock.calls[0]![1]).toEqual({ signal });
+  });
+
+  it("settles Groq's conservative reservation with the response's actual token usage", async () => {
+    const limiter = new GroqRateLimiter(new InMemoryGroqQuotaStateStore(), { requestsPerMinute: 10, tokensPerMinute: 2_000 }, "test");
+    const create = vi.fn().mockResolvedValue({
+      choices: [{ message: { content: JSON.stringify(proposal) } }],
+      usage: { total_tokens: 400 },
+    });
+    const adapter = new OpenAICompatibleChatCompletionsAdapter({ provider: "groq", client: { create } as never, groqRateLimiter: limiter });
+
+    await expect(adapter.generateProposal({ input: "input" })).resolves.toEqual(proposal);
+    await expect(limiter.reserve(1_500)).resolves.toMatchObject({ tokens: 1_500 });
   });
 });
