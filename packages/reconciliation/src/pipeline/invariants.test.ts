@@ -61,13 +61,14 @@ function adapter(proposal: (bankId: string) => AgentProposal): ReasoningModelAda
   return { generateProposal: async ({ input }) => proposal(primaryId(input)) };
 }
 
-async function runCase(bankRows: BankRow[], ledgerRows: LedgerRow[], modelAdapter: ReasoningModelAdapter) {
+async function runCase(bankRows: BankRow[], ledgerRows: LedgerRow[], modelAdapter: ReasoningModelAdapter, reasoningConcurrency?: number) {
   return runReconciliation({
     runId: "run-invariant-test",
     asOfDate: "2026-08-23",
     bankCsv: bankCsv(bankRows),
     ledgerCsv: ledgerCsv(ledgerRows),
     modelAdapter,
+    reasoningConcurrency,
     clock: () => new Date("2026-01-01T00:00:00.000Z"),
   });
 }
@@ -138,6 +139,31 @@ describe("T034 core engine safety invariants", () => {
     expect(result.results.some((item) => item.outcome === "RECONCILED")).toBe(false);
     expect(result.usedRecords.bankRecordIds.size).toBe(0);
     expect(result.usedRecords.ledgerRecordIds.size).toBe(0);
+  });
+
+  it("bounds concurrent reasoning calls at the configured wave size", async () => {
+    let activeCalls = 0;
+    let maxActiveCalls = 0;
+    const modelAdapter: ReasoningModelAdapter = {
+      generateProposal: async ({ input }) => {
+        activeCalls += 1;
+        maxActiveCalls = Math.max(maxActiveCalls, activeCalls);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        activeCalls -= 1;
+        return { ...proposalFor(primaryId(input), []), proposedOutcome: "INSUFFICIENT_EVIDENCE", confidence: "LOW" };
+      },
+    };
+    await runCase(
+      [{ id: "B1", amount: "100.00", reference: "BANK-1" }, { id: "B2", amount: "200.00", reference: "BANK-2" }, { id: "B3", amount: "300.00", reference: "BANK-3" }],
+      [
+        { id: "L1", amount: "100.00", reference: "LEDGER-1" }, { id: "L2", amount: "100.00", reference: "LEDGER-2" },
+        { id: "L3", amount: "200.00", reference: "LEDGER-3" }, { id: "L4", amount: "200.00", reference: "LEDGER-4" },
+        { id: "L5", amount: "300.00", reference: "LEDGER-5" }, { id: "L6", amount: "300.00", reference: "LEDGER-6" },
+      ],
+      modelAdapter,
+      2,
+    );
+    expect(maxActiveCalls).toBeLessThanOrEqual(2);
   });
 
   it("prevents record reuse after an accepted reconciliation", async () => {

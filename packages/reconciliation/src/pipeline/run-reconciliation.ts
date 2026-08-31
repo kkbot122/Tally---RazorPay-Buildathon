@@ -1,5 +1,4 @@
 import type { AgentProposal, FinalOutcome, ReasonCode } from "@tally/contracts";
-import pLimit from "p-limit";
 
 import { buildReconciliationReasoningInput, ReasoningAdapterError, type ReasoningPrimary } from "../agent/index.js";
 import type { CandidatePrimary, CandidateSet } from "../candidates/index.js";
@@ -120,7 +119,6 @@ export async function runReconciliation(input: RunReconciliationInput): Promise<
     .sort(compareReasoningDecisions);
   const usedRecords = cloneUsedRecords(deterministic.usedRecords);
 
-  const limit = pLimit(reasoningConcurrency);
   for (let waveStart = 0; waveStart < reasoningDecisions.length; waveStart += reasoningConcurrency) {
     throwIfAborted(input.signal);
     const waveDecisions = reasoningDecisions.slice(waveStart, waveStart + reasoningConcurrency);
@@ -164,7 +162,7 @@ export async function runReconciliation(input: RunReconciliationInput): Promise<
       });
     }
 
-    const settlements = await Promise.allSettled(preparedItems.map((item) => limit(async () => {
+    const settlements = await Promise.allSettled(preparedItems.map(async (item) => {
       trace.record({
         type: "AGENT_STARTED",
         caseId: item.caseId,
@@ -184,7 +182,7 @@ export async function runReconciliation(input: RunReconciliationInput): Promise<
         trace.record({ type: "AGENT_PROPOSED", caseId: item.caseId, payload: fallback });
         return fallback;
       }
-    })));
+    }));
 
     for (let itemIndex = 0; itemIndex < preparedItems.length; itemIndex += 1) {
       const item = preparedItems[itemIndex]!;
