@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { DEFAULT_GROQ_REASONING_MODEL, DEFAULT_GROQ_QUOTA_SCOPE, DEFAULT_GROQ_RATE_LIMIT } from "@tally/reconciliation";
 
 export const EnvSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
@@ -13,13 +14,18 @@ export const EnvSchema = z.object({
   AI_REQUEST_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(600_000).default(12_000),
   AI_MAX_RETRIES: z.coerce.number().int().min(0).max(3).default(0),
   AI_REASONING_CONCURRENCY: z.coerce.number().int().min(1).max(20).default(2),
+  AI_MAX_REASONING_CALLS_PER_RUN: z.coerce.number().int().min(1).max(100).default(3),
+  AI_GROQ_REQUESTS_PER_MINUTE: z.coerce.number().int().min(1).max(1_000).default(DEFAULT_GROQ_RATE_LIMIT.requestsPerMinute),
+  AI_GROQ_TOKENS_PER_MINUTE: z.coerce.number().int().min(1_000).max(10_000_000).default(DEFAULT_GROQ_RATE_LIMIT.tokensPerMinute),
+  /** A shared value for every replica using the same Groq organization. */
+  AI_GROQ_QUOTA_SCOPE: z.string().trim().min(1).max(200).default(DEFAULT_GROQ_QUOTA_SCOPE),
   AI_RUN_DEADLINE_MS: z.coerce.number().int().min(10_000).max(600_000).default(90_000),
   WEB_ORIGIN: z.string().url().default("http://localhost:3000"),
   TALLY_E2E_DETERMINISTIC_ADAPTER: z.enum(["true", "false"]).optional(),
 });
 
 export const DEFAULT_NVIDIA_MODEL = "nvidia/nemotron-3.5-lightning-30b-a3b";
-export const DEFAULT_GROQ_MODEL = "openai/gpt-oss-120b";
+export const DEFAULT_GROQ_MODEL = DEFAULT_GROQ_REASONING_MODEL;
 
 export type AppConfig = z.infer<typeof EnvSchema>;
 

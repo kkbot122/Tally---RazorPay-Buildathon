@@ -9,6 +9,8 @@ export {
 export { ReasoningAdapterError } from "./types.js";
 export type { OpenAIResponsesAdapterOptions } from "./openai-responses-adapter.js";
 export type { OpenAICompatibleChatCompletionsAdapterOptions } from "./openai-compatible-chat-completions-adapter.js";
+export { DEFAULT_GROQ_QUOTA_SCOPE, DEFAULT_GROQ_RATE_LIMIT, GroqRateLimiter, InMemoryGroqQuotaStateStore } from "./groq-rate-limiter.js";
+export type { GroqQuotaDimension, GroqQuotaState, GroqQuotaStateStore, GroqRateLimit, GroqReservation } from "./groq-rate-limiter.js";
 export type {
   ReasoningAdapterErrorCode,
   ReasoningAdapterDiagnostics,

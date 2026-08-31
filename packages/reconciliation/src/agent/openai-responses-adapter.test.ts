@@ -4,6 +4,7 @@ import { AgentProposalSchema } from "./proposal-schema.js";
 import { DEFAULT_REASONING_MODEL, OpenAIResponsesAdapter } from "./openai-responses-adapter.js";
 import { ReasoningAdapterError } from "./types.js";
 import { DEFAULT_GROQ_REASONING_MODEL, DEFAULT_NVIDIA_REASONING_MODEL, OpenAICompatibleChatCompletionsAdapter } from "./openai-compatible-chat-completions-adapter.js";
+import { GroqRateLimiter, InMemoryGroqQuotaStateStore } from "./groq-rate-limiter.js";
 
 const proposal = {
   proposedOutcome: "MATCH",
@@ -93,7 +94,7 @@ describe("OpenAICompatibleChatCompletionsAdapter", () => {
         { role: "user", content: "input" },
       ],
       response_format: { type: "json_object" },
-      max_tokens: 2048,
+      max_tokens: 16384,
     }));
   });
 
@@ -154,13 +155,54 @@ describe("OpenAICompatibleChatCompletionsAdapter", () => {
     });
   });
 
+  it("uses Groq token-reset headers for a shared retry cooldown without a 30-second cap", async () => {
+    const headers = new Headers({ "retry-after": "60", "x-ratelimit-reset-tokens": "90s", "x-ratelimit-remaining-tokens": "0" });
+    const providerError = Object.assign(new Error("token quota exceeded"), { status: 429, headers });
+    const create = vi.fn()
+      .mockRejectedValueOnce(providerError)
+      .mockResolvedValueOnce({ choices: [{ message: { content: JSON.stringify(proposal) } }] });
+    const waits: number[] = [];
+    let now = 1_000;
+    const limiter = new GroqRateLimiter(
+      new InMemoryGroqQuotaStateStore(),
+      { requestsPerMinute: 30, tokensPerMinute: 8_000 },
+      "test",
+      () => now,
+      async (ms) => { waits.push(ms); now += ms; },
+    );
+    const adapter = new OpenAICompatibleChatCompletionsAdapter({ provider: "groq", client: { create } as never, groqRateLimiter: limiter });
+
+    await expect(adapter.generateProposal({ input: "input" })).resolves.toEqual(proposal);
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(waits).toEqual([90_000]);
+  });
+
+  it("identifies a token-per-minute rejection in diagnostics", async () => {
+    const providerError = Object.assign(new Error("quota exceeded"), {
+      status: 429,
+      headers: new Headers({ "x-ratelimit-remaining-tokens": "0" }),
+    });
+    let now = 1_000;
+    const limiter = new GroqRateLimiter(
+      new InMemoryGroqQuotaStateStore(),
+      { requestsPerMinute: 30, tokensPerMinute: 8_000 },
+      "test",
+      () => now,
+      async (ms) => { now += ms; },
+    );
+    const create = vi.fn().mockRejectedValue(providerError);
+    const adapter = new OpenAICompatibleChatCompletionsAdapter({ client: { create } as never, groqRateLimiter: limiter });
+
+    await expect(adapter.generateProposal({ input: "input" })).rejects.toMatchObject({ diagnostics: { category: "RATE_LIMIT", rateLimitDimension: "TPM" } });
+  });
+
   it("sends Groq-compatible JSON requests with the configured model and cancellation", async () => {
     const create = vi.fn().mockResolvedValue({ choices: [{ message: { content: JSON.stringify(proposal) } }] });
     const signal = new AbortController().signal;
     const adapter = new OpenAICompatibleChatCompletionsAdapter({ provider: "groq", model: "groq-test", client: { create } as never });
 
     await expect(adapter.generateProposal({ input: "input", signal })).resolves.toEqual(proposal);
-    expect(create.mock.calls[0]![0]).toEqual(expect.objectContaining({ model: "groq-test", response_format: { type: "json_object" }, temperature: 0 }));
+    expect(create.mock.calls[0]![0]).toEqual(expect.objectContaining({ model: "groq-test", response_format: { type: "json_object" }, temperature: 0, max_completion_tokens: 2048 }));
     expect((create.mock.calls[0]![0] as Record<string, unknown>).chat_template_kwargs).toBeUndefined();
     expect(create.mock.calls[0]![1]).toEqual({ signal });
   });

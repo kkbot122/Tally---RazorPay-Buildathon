@@ -1,4 +1,5 @@
 import type { AgentProposal } from "@tally/contracts";
+import type { GroqQuotaDimension } from "./groq-rate-limiter.js";
 
 export type ReasoningModelInput = {
   input: string;
@@ -15,9 +16,11 @@ export interface ReasoningModelAdapter {
 export type ReasoningAdapterErrorCode = "AI_REQUEST_ERROR" | "AI_SCHEMA_ERROR";
 
 export type ReasoningAdapterDiagnostics = {
-  provider: "openai" | "nvidia" | "groq";
+  provider?: "openai" | "nvidia" | "groq";
   model?: string;
-  category?: "TIMEOUT" | "RATE_LIMIT" | "AUTHENTICATION" | "VALIDATION" | "SERVER" | "UNKNOWN";
+  category?: "TIMEOUT" | "RATE_LIMIT" | "CALL_BUDGET" | "AUTHENTICATION" | "VALIDATION" | "SERVER" | "UNKNOWN";
+  /** The provider quota which rejected this request, when its headers identify one. */
+  rateLimitDimension?: GroqQuotaDimension;
   status?: number;
   durationMs?: number;
 };

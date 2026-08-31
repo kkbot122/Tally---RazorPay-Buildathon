@@ -79,6 +79,7 @@ export function createReconciliationRunService(
   onRunFailure?: (event: { runId: string; failureCode: string; traceEventCount: number; failurePersistenceFailed?: boolean }) => void,
   onModelFailure?: Parameters<typeof runReconciliation>[0]["onModelFailure"],
   runDeadlineMs = 90_000,
+  maxReasoningCalls = 100,
 ): ReconciliationRunService {
   const controllers = new Map<string, AbortController>();
 
@@ -92,6 +93,7 @@ export function createReconciliationRunService(
         ledgerCsv: request.ledgerCsv,
         modelAdapter,
         reasoningConcurrency,
+        maxReasoningCalls,
         onVerificationFailure,
         onModelFailure,
         signal: controller.signal,

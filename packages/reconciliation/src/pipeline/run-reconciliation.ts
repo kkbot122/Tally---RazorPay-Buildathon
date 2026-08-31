@@ -23,6 +23,17 @@ type PreparedReasoningItem = {
 
 export async function runReconciliation(input: RunReconciliationInput): Promise<ReconciliationRunResult> {
   const reasoningConcurrency = validateReasoningConcurrency(input.reasoningConcurrency);
+  const maxReasoningCalls = validateMaxReasoningCalls(input.maxReasoningCalls);
+  let reasoningCalls = 0;
+  const requestProposal: RunReconciliationInput["modelAdapter"]["generateProposal"] = (modelInput) => {
+    if (reasoningCalls >= maxReasoningCalls) {
+      throw new ReasoningAdapterError("AI_REQUEST_ERROR", "The reconciliation run exhausted its model-call budget.", {
+        diagnostics: { category: "CALL_BUDGET" },
+      });
+    }
+    reasoningCalls += 1;
+    return input.modelAdapter.generateProposal(modelInput);
+  };
   // T022 retains an envelope timestamp for compatibility, but T023 ordering is
   // sequenceNo. Tests may inject a clock when they need reproducible snapshots.
   const trace = createTraceRecorder({ runId: input.runId, clock: input.clock });
@@ -173,7 +184,7 @@ export async function runReconciliation(input: RunReconciliationInput): Promise<
         },
       });
       try {
-        return await generateProposalWithVerifierRetry(item, input.modelAdapter, records, input.asOfDate, waveSnapshot, trace, input.signal);
+        return await generateProposalWithVerifierRetry(item, requestProposal, records, input.asOfDate, waveSnapshot, trace, input.signal);
       } catch (error) {
         if (input.signal?.aborted) throw new ReconciliationRunAbortedError(abortReason(input.signal));
         if (!(error instanceof ReasoningAdapterError) || (error.code !== "AI_SCHEMA_ERROR" && error.code !== "AI_REQUEST_ERROR")) throw error;
@@ -213,6 +224,12 @@ function validateReasoningConcurrency(value: number | undefined): number {
     throw new Error("reasoningConcurrency must be a finite positive integer");
   }
   return concurrency;
+}
+
+function validateMaxReasoningCalls(value: number | undefined): number {
+  const limit = value ?? 100;
+  if (!Number.isFinite(limit) || !Number.isInteger(limit) || limit < 1) throw new Error("maxReasoningCalls must be a finite positive integer");
+  return limit;
 }
 
 function finalizeAgentProposal(
@@ -268,14 +285,14 @@ function isStructuralModelFailure(code: string): boolean {
 
 async function generateProposalWithVerifierRetry(
   item: PreparedReasoningItem,
-  modelAdapter: RunReconciliationInput["modelAdapter"],
+  requestProposal: RunReconciliationInput["modelAdapter"]["generateProposal"],
   records: RecordLookup,
   asOfDate: string,
   usedRecords: UsedRecordState,
   trace: TraceRecorder,
   signal?: AbortSignal,
 ): Promise<AgentProposal> {
-  let proposal = await modelAdapter.generateProposal({ ...item.promptInput, signal });
+  let proposal = await requestProposal({ ...item.promptInput, signal });
   trace.record({ type: "AGENT_PROPOSED", caseId: item.caseId, payload: proposal });
 
   for (let attempt = 0; attempt < 1; attempt += 1) {
@@ -286,7 +303,7 @@ async function generateProposalWithVerifierRetry(
       message: failure.message,
       recordIds: failure.recordIds ?? [],
     }));
-    proposal = await modelAdapter.generateProposal({
+    proposal = await requestProposal({
       ...item.promptInput,
       retryFeedback: JSON.stringify({ caseId: item.caseId, proposedBankRecordIds: proposal.bankRecordIds, proposedLedgerRecordIds: proposal.ledgerRecordIds, verifierFailures: feedback }),
       signal,

@@ -16,6 +16,10 @@ describe("API environment configuration", () => {
       AI_REQUEST_TIMEOUT_MS: 12000,
       AI_MAX_RETRIES: 0,
       AI_REASONING_CONCURRENCY: 2,
+      AI_MAX_REASONING_CALLS_PER_RUN: 3,
+      AI_GROQ_REQUESTS_PER_MINUTE: 30,
+      AI_GROQ_TOKENS_PER_MINUTE: 8000,
+      AI_GROQ_QUOTA_SCOPE: "groq:organization",
       AI_RUN_DEADLINE_MS: 90000,
       WEB_ORIGIN: "http://localhost:3000",
     });
@@ -30,7 +34,7 @@ describe("API environment configuration", () => {
         OPENAI_MODEL: "test-model",
         WEB_ORIGIN: "https://web.example",
       }),
-    ).toMatchObject({ PORT: 4000, OPENAI_MODEL: "test-model", AI_PROVIDER: "openai", AI_REASONING_EFFORT: "none", AI_REASONING_CONCURRENCY: 2, AI_RUN_DEADLINE_MS: 90000 });
+    ).toMatchObject({ PORT: 4000, OPENAI_MODEL: "test-model", AI_PROVIDER: "openai", AI_REASONING_EFFORT: "none", AI_REASONING_CONCURRENCY: 2, AI_MAX_REASONING_CALLS_PER_RUN: 3, AI_GROQ_TOKENS_PER_MINUTE: 8000, AI_RUN_DEADLINE_MS: 90000 });
 
     expect(() => EnvSchema.parse({ PORT: "70000" })).toThrow();
     expect(() => EnvSchema.parse({ WEB_ORIGIN: "not-a-url" })).toThrow();

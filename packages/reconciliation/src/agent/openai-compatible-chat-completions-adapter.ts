@@ -7,10 +7,12 @@ import {
   type ReasoningModelAdapter,
   type ReasoningModelInput,
 } from "./types.js";
+import { DEFAULT_GROQ_RATE_LIMIT, GroqRateLimiter, InMemoryGroqQuotaStateStore } from "./groq-rate-limiter.js";
 
 export const DEFAULT_NVIDIA_REASONING_MODEL = "nvidia/nemotron-3.5-lightning-30b-a3b";
 export const DEFAULT_GROQ_REASONING_MODEL = "openai/gpt-oss-120b";
-export const MAX_REASONING_COMPLETION_TOKENS = 2048;
+export const MAX_GROQ_REASONING_COMPLETION_TOKENS = 2048;
+export const MAX_NVIDIA_REASONING_COMPLETION_TOKENS = 16384;
 
 const NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1";
 const GROQ_BASE_URL = "https://api.groq.com/openai/v1";
@@ -41,6 +43,8 @@ export type OpenAICompatibleChatCompletionsAdapterOptions = {
   timeout?: number;
   maxRetries?: number;
   client?: ChatCompletionsClient;
+  /** Required in production: its state store coordinates all API replicas. */
+  groqRateLimiter?: GroqRateLimiter;
 };
 
 export class OpenAICompatibleChatCompletionsAdapter implements ReasoningModelAdapter {
@@ -48,6 +52,7 @@ export class OpenAICompatibleChatCompletionsAdapter implements ReasoningModelAda
   private readonly model: string;
   private readonly reasoningEffort: "none" | "high" | "max";
   private readonly client: ChatCompletionsClient;
+  private readonly groqRateLimiter: GroqRateLimiter | undefined;
 
   constructor(options: OpenAICompatibleChatCompletionsAdapterOptions = {}) {
     this.provider = options.provider ?? "groq";
@@ -59,13 +64,21 @@ export class OpenAICompatibleChatCompletionsAdapter implements ReasoningModelAda
       timeout: options.timeout,
       maxRetries: options.maxRetries,
     }).chat.completions;
+    if (this.provider === "groq" && options.groqRateLimiter === undefined && process.env.NODE_ENV === "production") {
+      throw new Error("A shared Groq rate limiter is required in production.");
+    }
+    this.groqRateLimiter = this.provider === "groq"
+      ? options.groqRateLimiter ?? new GroqRateLimiter(new InMemoryGroqQuotaStateStore(), DEFAULT_GROQ_RATE_LIMIT)
+      : undefined;
   }
 
   async generateProposal(input: ReasoningModelInput): Promise<AgentProposal> {
     const requestProposal = async (instruction: string) => {
-      const startedAt = Date.now();
-      try {
-        const request = {
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const startedAt = Date.now();
+        try {
+          if (this.provider === "groq") await this.groqRateLimiter!.reserve(estimateRequestTokens(instruction, input.retryFeedback), input.signal);
+          const request = {
           model: this.model,
           messages: [
             { role: "system", content: PROPOSAL_FORMAT },
@@ -73,22 +86,29 @@ export class OpenAICompatibleChatCompletionsAdapter implements ReasoningModelAda
           ],
           response_format: { type: "json_object" },
           temperature: 0,
-          // Groq prefers max_completion_tokens; keep NVIDIA's established
-          // max_tokens shape while using the same small proposal budget.
+          // Groq uses a deliberately bounded output reservation. NVIDIA retains
+          // its established budget because it is not part of Groq's quota.
           ...(this.provider === "groq"
-            ? { max_completion_tokens: MAX_REASONING_COMPLETION_TOKENS }
-            : { max_tokens: MAX_REASONING_COMPLETION_TOKENS }),
+            ? { max_completion_tokens: MAX_GROQ_REASONING_COMPLETION_TOKENS }
+            : { max_tokens: MAX_NVIDIA_REASONING_COMPLETION_TOKENS }),
           ...(this.provider === "nvidia" && this.model.startsWith("nvidia/nemotron-3.5-lightning")
             ? { chat_template_kwargs: { enable_thinking: this.reasoningEffort !== "none" } }
             : {}),
         };
-        return await this.client.create(request as never, { signal: input.signal });
-      } catch (error) {
-        throw new ReasoningAdapterError("AI_REQUEST_ERROR", `The ${this.provider} reasoning request failed.`, {
-          cause: error,
-          diagnostics: { provider: this.provider, model: this.model, durationMs: Date.now() - startedAt, ...classifyProviderError(error) },
-        });
+          return await this.client.create(request as never, { signal: input.signal });
+        } catch (error) {
+          const classified = classifyProviderError(error);
+          if (this.provider === "groq" && classified.status === 429 && attempt === 0) {
+            await this.groqRateLimiter!.blockFor(retryAfterMs(error));
+            continue;
+          }
+          throw new ReasoningAdapterError("AI_REQUEST_ERROR", `The ${this.provider} reasoning request failed.`, {
+            cause: error,
+            diagnostics: { provider: this.provider, model: this.model, durationMs: Date.now() - startedAt, ...classified },
+          });
+        }
       }
+      throw new Error("unreachable");
     };
 
     const parseProposal = (response: Awaited<ReturnType<ChatCompletionsClient["create"]>>) => {
@@ -123,12 +143,60 @@ export class OpenAICompatibleChatCompletionsAdapter implements ReasoningModelAda
   }
 }
 
-function classifyProviderError(error: unknown): Pick<ReasoningAdapterDiagnostics, "category" | "status"> {
+function retryAfterMs(error: unknown): number {
+  const retryAfter = header(error, "retry-after");
+  const retryAfterMs = parseRetryAfter(retryAfter);
+  const tokenResetMs = parseDuration(header(error, "x-ratelimit-reset-tokens"));
+  const requestResetMs = parseDuration(header(error, "x-ratelimit-reset-requests"));
+  return Math.max(retryAfterMs ?? 0, tokenResetMs ?? 0, requestResetMs ?? 0, 1_000);
+}
+
+function classifyProviderError(error: unknown): Pick<ReasoningAdapterDiagnostics, "category" | "status" | "rateLimitDimension"> {
   const status = error !== null && typeof error === "object" && "status" in error && typeof error.status === "number" ? error.status : undefined;
   if (status === 401 || status === 403) return { status, category: "AUTHENTICATION" };
-  if (status === 429) return { status, category: "RATE_LIMIT" };
+  if (status === 429) return { status, category: "RATE_LIMIT", rateLimitDimension: quotaDimension(error) };
   if (status !== undefined && status >= 400 && status < 500) return { status, category: "VALIDATION" };
   if (status !== undefined && status >= 500) return { status, category: "SERVER" };
   if (error instanceof Error && (error.name === "AbortError" || /timed out|timeout/i.test(error.message))) return { category: "TIMEOUT" };
   return { category: "UNKNOWN" };
+}
+
+function quotaDimension(error: unknown): "RPM" | "TPM" | "RPD" | "TPD" | undefined {
+  const message = error instanceof Error ? error.message : "";
+  if (/tokens? per day|daily token/i.test(message)) return "TPD";
+  if (/requests? per day|daily request/i.test(message)) return "RPD";
+  if (header(error, "x-ratelimit-remaining-tokens") === "0") return "TPM";
+  if (header(error, "x-ratelimit-remaining-requests") === "0") return "RPM";
+  if (header(error, "x-ratelimit-remaining-tokens-day") === "0") return "TPD";
+  if (header(error, "x-ratelimit-remaining-requests-day") === "0") return "RPD";
+  return undefined;
+}
+
+function estimateRequestTokens(instruction: string, retryFeedback: string | undefined): number {
+  // Conservative character estimate: the configured completion ceiling is also
+  // reserved because Groq enforces the combined prompt + completion budget.
+  return Math.ceil((PROPOSAL_FORMAT.length + instruction.length + (retryFeedback?.length ?? 0)) / 3.5) + MAX_GROQ_REASONING_COMPLETION_TOKENS;
+}
+
+function header(error: unknown, name: string): string | null {
+  const headers = error !== null && typeof error === "object" && "headers" in error ? error.headers : undefined;
+  return headers !== null && typeof headers === "object" && "get" in headers && typeof headers.get === "function"
+    ? (headers.get(name) as string | null)
+    : null;
+}
+
+function parseRetryAfter(value: string | null): number | undefined {
+  if (value === null) return undefined;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1_000;
+  const date = Date.parse(value);
+  return Number.isNaN(date) ? undefined : Math.max(0, date - Date.now());
+}
+
+function parseDuration(value: string | null): number | undefined {
+  if (value === null) return undefined;
+  const seconds = /^([0-9]+(?:\.[0-9]+)?)s$/i.exec(value.trim());
+  if (seconds !== null) return Number(seconds[1]) * 1_000;
+  const milliseconds = Number(value);
+  return Number.isFinite(milliseconds) && milliseconds >= 0 ? milliseconds : undefined;
 }

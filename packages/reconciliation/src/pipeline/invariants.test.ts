@@ -61,7 +61,7 @@ function adapter(proposal: (bankId: string) => AgentProposal): ReasoningModelAda
   return { generateProposal: async ({ input }) => proposal(primaryId(input)) };
 }
 
-async function runCase(bankRows: BankRow[], ledgerRows: LedgerRow[], modelAdapter: ReasoningModelAdapter, reasoningConcurrency?: number) {
+async function runCase(bankRows: BankRow[], ledgerRows: LedgerRow[], modelAdapter: ReasoningModelAdapter, reasoningConcurrency?: number, maxReasoningCalls?: number) {
   return runReconciliation({
     runId: "run-invariant-test",
     asOfDate: "2026-08-23",
@@ -69,6 +69,7 @@ async function runCase(bankRows: BankRow[], ledgerRows: LedgerRow[], modelAdapte
     ledgerCsv: ledgerCsv(ledgerRows),
     modelAdapter,
     reasoningConcurrency,
+    maxReasoningCalls,
     clock: () => new Date("2026-01-01T00:00:00.000Z"),
   });
 }
@@ -164,6 +165,18 @@ describe("T034 core engine safety invariants", () => {
       2,
     );
     expect(maxActiveCalls).toBeLessThanOrEqual(2);
+  });
+
+  it("caps all model calls in a run, including calls scheduled concurrently", async () => {
+    let calls = 0;
+    await runCase(
+      [{ id: "B1", amount: "100.00", reference: "BANK-1" }, { id: "B2", amount: "200.00", reference: "BANK-2" }],
+      [{ id: "L1", amount: "100.00", reference: "LEDGER-1" }, { id: "L2", amount: "100.00", reference: "LEDGER-2" }, { id: "L3", amount: "200.00", reference: "LEDGER-3" }, { id: "L4", amount: "200.00", reference: "LEDGER-4" }],
+      { generateProposal: async ({ input }) => { calls += 1; return { ...proposalFor(primaryId(input), []), proposedOutcome: "INSUFFICIENT_EVIDENCE", confidence: "LOW" }; } },
+      2,
+      1,
+    );
+    expect(calls).toBe(1);
   });
 
   it("prevents record reuse after an accepted reconciliation", async () => {

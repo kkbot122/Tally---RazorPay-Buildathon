@@ -1,6 +1,6 @@
 import { loadFrozenGroundTruth, loadFrozenPrimaryCaseAlignment } from "@tally/benchmark";
 import Fastify from "fastify";
-import { CsvValidationError, DEFAULT_REASONING_CONCURRENCY, OpenAICompatibleChatCompletionsAdapter, OpenAIResponsesAdapter } from "@tally/reconciliation";
+import { CsvValidationError, DEFAULT_REASONING_CONCURRENCY, GroqRateLimiter, OpenAICompatibleChatCompletionsAdapter, OpenAIResponsesAdapter } from "@tally/reconciliation";
 import { ZodError } from "zod";
 import type { AppConfig } from "./config/env.js";
 import { loadConfig, useE2EDeterministicAdapter } from "./config/env.js";
@@ -9,6 +9,7 @@ import { createReconciliationRunRepository } from "./db/reconciliation-run-repos
 import { BenchmarkEvaluationError, createBenchmarkEvaluationService, type BenchmarkEvaluationResponse } from "./benchmark-evaluation-service.js";
 import { CreateRunRequestSchema, createReconciliationRunService, RunFailedError, TraceUnavailableError, type ReconciliationRunService } from "./run-service.js";
 import { createE2EReasoningAdapter } from "./e2e-reasoning-adapter.js";
+import { PostgresGroqQuotaStateStore } from "./groq-postgres-quota-store.js";
 
 const EVALUATION_TRUTH_FIELDS = new Set([
   "groundtruthcsv",
@@ -26,6 +27,7 @@ function normalizedEvaluationField(value: string): string {
 
 export interface DatabaseHandle {
   db?: Parameters<typeof createReconciliationRunRepository>[0];
+  sql?: ReturnType<typeof createDatabase>["sql"];
   check(): Promise<void>;
   close(): Promise<void>;
 }
@@ -77,6 +79,12 @@ export function buildApp(
             reasoningEffort: config.AI_REASONING_EFFORT,
             timeout: config.AI_REQUEST_TIMEOUT_MS,
             maxRetries: config.AI_MAX_RETRIES,
+            groqRateLimiter: config.AI_PROVIDER === "groq" && database.sql !== undefined
+              ? new GroqRateLimiter(new PostgresGroqQuotaStateStore(database.sql), {
+                  requestsPerMinute: config.AI_GROQ_REQUESTS_PER_MINUTE,
+                  tokensPerMinute: config.AI_GROQ_TOKENS_PER_MINUTE,
+                }, config.AI_GROQ_QUOTA_SCOPE)
+              : undefined,
           }),
     undefined,
     undefined,
@@ -86,6 +94,7 @@ export function buildApp(
     (event) => app.log.error(event, event.failurePersistenceFailed ? "run failure persistence failed" : "reconciliation run failed"),
     (event) => app.log.warn(event, "model request failed"),
     config.AI_RUN_DEADLINE_MS,
+    config.AI_MAX_REASONING_CALLS_PER_RUN,
   ));
   const benchmarkEvaluationService = evaluationService ?? (database.db === undefined ? undefined : createBenchmarkEvaluationService(
       createReconciliationRunRepository(database.db),

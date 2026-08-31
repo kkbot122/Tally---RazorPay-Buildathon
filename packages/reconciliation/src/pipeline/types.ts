@@ -18,6 +18,8 @@ export type RunReconciliationInput = {
   usedRecords?: UsedRecordState;
   modelAdapter: ReasoningModelAdapter;
   reasoningConcurrency?: number;
+  /** Hard ceiling for all provider calls in this run, including repair calls. */
+  maxReasoningCalls?: number;
   /** Aborts provider work and terminates the run when the operational budget is exhausted. */
   signal?: AbortSignal;
   /** Test hook only; production runs use the recorder's default clock. */

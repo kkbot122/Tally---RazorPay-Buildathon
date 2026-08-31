@@ -43,6 +43,13 @@
       "when": 1787759300000,
       "tag": "0005_failed_trace_event",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1788181200000,
+      "tag": "0006_groq_quota_state",
+      "breakpoints": true
     }
   ]
 }
