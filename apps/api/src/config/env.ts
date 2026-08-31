@@ -5,10 +5,10 @@ export const EnvSchema = z.object({
   PORT: z.coerce.number().int().min(1).max(65535).default(3001),
   DATABASE_URL: z.string().url().default("postgresql://localhost:5432/tally"),
   OPENAI_API_KEY: z.string().default(""),
-  GEMINI_API_KEY: z.string().default(""),
+  GROQ_API_KEY: z.string().default(""),
   OPENAI_MODEL: z.string().trim().min(1).default("gpt-5.6-terra"),
-  AI_PROVIDER: z.enum(["openai", "nvidia", "gemini"]).default("openai"),
-  AI_BASE_URL: z.string().url().optional(),
+  AI_PROVIDER: z.enum(["openai", "nvidia", "groq"]).default("openai"),
+  AI_BASE_URL: z.preprocess((value) => value === "" ? undefined : value, z.string().url().optional()),
   AI_REASONING_EFFORT: z.enum(["none", "high", "max"]).default("none"),
   AI_REQUEST_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(600_000).default(12_000),
   AI_MAX_RETRIES: z.coerce.number().int().min(0).max(3).default(0),
@@ -19,7 +19,7 @@ export const EnvSchema = z.object({
 });
 
 export const DEFAULT_NVIDIA_MODEL = "nvidia/nemotron-3.5-lightning-30b-a3b";
-export const DEFAULT_GEMINI_MODEL = "gemini-3.6-flash";
+export const DEFAULT_GROQ_MODEL = "llama-3.3-70b-versatile";
 
 export type AppConfig = z.infer<typeof EnvSchema>;
 
@@ -27,12 +27,13 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
   const parsed = EnvSchema.parse(environment);
   const config = parsed.AI_PROVIDER === "nvidia" && parsed.OPENAI_MODEL === "gpt-5.6-terra"
     ? { ...parsed, OPENAI_MODEL: DEFAULT_NVIDIA_MODEL }
-    : parsed.AI_PROVIDER === "gemini" && parsed.OPENAI_MODEL === "gpt-5.6-terra"
-      ? { ...parsed, OPENAI_MODEL: DEFAULT_GEMINI_MODEL }
+    : parsed.AI_PROVIDER === "groq" && parsed.OPENAI_MODEL === "gpt-5.6-terra"
+      ? { ...parsed, OPENAI_MODEL: DEFAULT_GROQ_MODEL }
       : parsed;
   if (config.NODE_ENV === "production") {
-    if (config.AI_PROVIDER === "gemini" ? config.GEMINI_API_KEY.trim().length === 0 : config.OPENAI_API_KEY.trim().length === 0) {
-      throw new Error(config.AI_PROVIDER === "gemini" ? "GEMINI_API_KEY is required in production" : "OPENAI_API_KEY is required in production");
+    const apiKey = config.AI_PROVIDER === "groq" ? config.GROQ_API_KEY : config.OPENAI_API_KEY;
+    if (apiKey.trim().length === 0) {
+      throw new Error(config.AI_PROVIDER === "groq" ? "GROQ_API_KEY is required in production" : "OPENAI_API_KEY is required in production");
     }
     if (config.DATABASE_URL === "postgresql://localhost:5432/tally") throw new Error("DATABASE_URL is required in production");
     if (config.WEB_ORIGIN === "http://localhost:3000") throw new Error("WEB_ORIGIN is required in production");

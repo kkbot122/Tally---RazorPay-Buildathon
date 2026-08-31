@@ -1,6 +1,6 @@
 import { loadFrozenGroundTruth, loadFrozenPrimaryCaseAlignment } from "@tally/benchmark";
 import Fastify from "fastify";
-import { CsvValidationError, DEFAULT_REASONING_CONCURRENCY, GeminiAdapter, NvidiaChatCompletionsAdapter, OpenAIResponsesAdapter } from "@tally/reconciliation";
+import { CsvValidationError, DEFAULT_REASONING_CONCURRENCY, OpenAICompatibleChatCompletionsAdapter, OpenAIResponsesAdapter } from "@tally/reconciliation";
 import { ZodError } from "zod";
 import type { AppConfig } from "./config/env.js";
 import { loadConfig, useE2EDeterministicAdapter } from "./config/env.js";
@@ -67,11 +67,17 @@ export function buildApp(
     createReconciliationRunRepository(database.db),
     useE2EDeterministicAdapter(config)
       ? createE2EReasoningAdapter()
-      : config.AI_PROVIDER === "nvidia"
-        ? new NvidiaChatCompletionsAdapter({ apiKey: config.OPENAI_API_KEY, model: config.OPENAI_MODEL, baseURL: config.AI_BASE_URL, reasoningEffort: config.AI_REASONING_EFFORT, timeout: config.AI_REQUEST_TIMEOUT_MS, maxRetries: config.AI_MAX_RETRIES })
-        : config.AI_PROVIDER === "gemini"
-          ? new GeminiAdapter({ apiKey: config.GEMINI_API_KEY, model: config.OPENAI_MODEL, timeout: config.AI_REQUEST_TIMEOUT_MS })
-        : new OpenAIResponsesAdapter({ apiKey: config.OPENAI_API_KEY, model: config.OPENAI_MODEL, baseURL: config.AI_BASE_URL, timeout: config.AI_REQUEST_TIMEOUT_MS, maxRetries: config.AI_MAX_RETRIES }),
+      : config.AI_PROVIDER === "openai"
+        ? new OpenAIResponsesAdapter({ apiKey: config.OPENAI_API_KEY, model: config.OPENAI_MODEL, baseURL: config.AI_BASE_URL, timeout: config.AI_REQUEST_TIMEOUT_MS, maxRetries: config.AI_MAX_RETRIES })
+        : new OpenAICompatibleChatCompletionsAdapter({
+            provider: config.AI_PROVIDER,
+            apiKey: config.AI_PROVIDER === "groq" ? config.GROQ_API_KEY : config.OPENAI_API_KEY,
+            model: config.OPENAI_MODEL,
+            baseURL: config.AI_BASE_URL,
+            reasoningEffort: config.AI_REASONING_EFFORT,
+            timeout: config.AI_REQUEST_TIMEOUT_MS,
+            maxRetries: config.AI_MAX_RETRIES,
+          }),
     undefined,
     undefined,
     (event) => app.log.warn(event, "model proposal rejected by verifier"),

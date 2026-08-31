@@ -1,11 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { ThinkingLevel } from "@google/genai";
 
 import { AgentProposalSchema } from "./proposal-schema.js";
 import { DEFAULT_REASONING_MODEL, OpenAIResponsesAdapter } from "./openai-responses-adapter.js";
 import { ReasoningAdapterError } from "./types.js";
-import { DEFAULT_NVIDIA_REASONING_MODEL, NvidiaChatCompletionsAdapter } from "./nvidia-chat-completions-adapter.js";
-import { DEFAULT_GEMINI_REASONING_MODEL, GeminiAdapter } from "./gemini-adapter.js";
+import { DEFAULT_GROQ_REASONING_MODEL, DEFAULT_NVIDIA_REASONING_MODEL, OpenAICompatibleChatCompletionsAdapter } from "./openai-compatible-chat-completions-adapter.js";
 
 const proposal = {
   proposedOutcome: "MATCH",
@@ -82,10 +80,10 @@ describe("OpenAIResponsesAdapter", () => {
   });
 });
 
-describe("NvidiaChatCompletionsAdapter", () => {
+describe("OpenAICompatibleChatCompletionsAdapter", () => {
   it("uses the NVIDIA chat endpoint contract and validates JSON proposals", async () => {
     const create = vi.fn().mockResolvedValue({ choices: [{ message: { content: JSON.stringify(proposal) } }] });
-    const adapter = new NvidiaChatCompletionsAdapter({ client: { create } as never });
+    const adapter = new OpenAICompatibleChatCompletionsAdapter({ provider: "nvidia", client: { create } as never });
 
     await expect(adapter.generateProposal({ input: "input" })).resolves.toEqual(proposal);
     expect(create.mock.calls[0]![0]).toEqual(expect.objectContaining({
@@ -101,7 +99,7 @@ describe("NvidiaChatCompletionsAdapter", () => {
 
   it("rejects invalid NVIDIA JSON output", async () => {
     const create = vi.fn().mockResolvedValue({ choices: [{ message: { content: "not-json" } }] });
-    const adapter = new NvidiaChatCompletionsAdapter({ client: { create } as never });
+    const adapter = new OpenAICompatibleChatCompletionsAdapter({ provider: "nvidia", client: { create } as never });
 
     await expect(adapter.generateProposal({ input: "input" })).rejects.toMatchObject({ code: "AI_SCHEMA_ERROR" });
   });
@@ -112,7 +110,7 @@ describe("NvidiaChatCompletionsAdapter", () => {
       .fn()
       .mockResolvedValueOnce({ choices: [{ message: { content: JSON.stringify(incomplete) } }] })
       .mockResolvedValueOnce({ choices: [{ message: { content: JSON.stringify(proposal) } }] });
-    const adapter = new NvidiaChatCompletionsAdapter({ client: { create } as never });
+    const adapter = new OpenAICompatibleChatCompletionsAdapter({ provider: "nvidia", client: { create } as never });
 
     await expect(adapter.generateProposal({ input: "input" })).resolves.toEqual(proposal);
     expect(create).toHaveBeenCalledTimes(2);
@@ -121,7 +119,8 @@ describe("NvidiaChatCompletionsAdapter", () => {
 
   it("uses Nemotron's chat-template thinking switch instead of DeepSeek reasoning_effort", async () => {
     const create = vi.fn().mockResolvedValue({ choices: [{ message: { content: JSON.stringify(proposal) } }] });
-    const adapter = new NvidiaChatCompletionsAdapter({
+    const adapter = new OpenAICompatibleChatCompletionsAdapter({
+      provider: "nvidia",
       model: "nvidia/nemotron-3.5-lightning-30b-a3b",
       client: { create } as never,
     });
@@ -136,7 +135,7 @@ describe("NvidiaChatCompletionsAdapter", () => {
   it("passes cancellation to the SDK request options instead of the provider JSON body", async () => {
     const create = vi.fn().mockResolvedValue({ choices: [{ message: { content: JSON.stringify(proposal) } }] });
     const signal = new AbortController().signal;
-    const adapter = new NvidiaChatCompletionsAdapter({ client: { create } as never });
+    const adapter = new OpenAICompatibleChatCompletionsAdapter({ provider: "nvidia", client: { create } as never });
 
     await expect(adapter.generateProposal({ input: "input", signal })).resolves.toEqual(proposal);
 
@@ -144,42 +143,25 @@ describe("NvidiaChatCompletionsAdapter", () => {
     expect(request.signal).toBeUndefined();
     expect(create.mock.calls[0]![1]).toEqual({ signal });
   });
-});
-
-describe("GeminiAdapter", () => {
-  it("requests schema-constrained JSON with minimal thinking and forwards cancellation", async () => {
-    const generateContent = vi.fn().mockResolvedValue({ text: JSON.stringify(proposal) });
-    const signal = new AbortController().signal;
-    const adapter = new GeminiAdapter({ client: { generateContent } as never });
-
-    await expect(adapter.generateProposal({ input: "input", signal })).resolves.toEqual(proposal);
-
-    const request = generateContent.mock.calls[0]![0] as { model: string; contents: string; config: Record<string, unknown> };
-    expect(request.model).toBe(DEFAULT_GEMINI_REASONING_MODEL);
-    expect(request.contents).toBe("input");
-    expect(request.config).toMatchObject({
-      abortSignal: signal,
-      responseMimeType: "application/json",
-      thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL },
-      responseJsonSchema: expect.objectContaining({ type: "object", additionalProperties: false }),
-    });
-  });
-
-  it("rejects malformed Gemini output without fabricating a proposal", async () => {
-    const generateContent = vi.fn().mockResolvedValue({ text: "not-json" });
-    const adapter = new GeminiAdapter({ client: { generateContent } as never });
-
-    await expect(adapter.generateProposal({ input: "input" })).rejects.toMatchObject({ code: "AI_SCHEMA_ERROR" });
-  });
-
-  it("normalizes Gemini provider failures with sanitized diagnostics", async () => {
+  it("uses the Groq defaults and reports provider diagnostics", async () => {
     const providerError = Object.assign(new Error("quota exceeded"), { status: 429 });
-    const generateContent = vi.fn().mockRejectedValue(providerError);
-    const adapter = new GeminiAdapter({ model: "gemini-test", client: { generateContent } as never });
+    const create = vi.fn().mockRejectedValue(providerError);
+    const adapter = new OpenAICompatibleChatCompletionsAdapter({ client: { create } as never });
 
     await expect(adapter.generateProposal({ input: "input" })).rejects.toMatchObject({
       code: "AI_REQUEST_ERROR",
-      diagnostics: { provider: "gemini", model: "gemini-test", category: "RATE_LIMIT", status: 429 },
+      diagnostics: { provider: "groq", model: DEFAULT_GROQ_REASONING_MODEL, category: "RATE_LIMIT", status: 429 },
     });
+  });
+
+  it("sends Groq-compatible JSON requests with the configured model and cancellation", async () => {
+    const create = vi.fn().mockResolvedValue({ choices: [{ message: { content: JSON.stringify(proposal) } }] });
+    const signal = new AbortController().signal;
+    const adapter = new OpenAICompatibleChatCompletionsAdapter({ provider: "groq", model: "groq-test", client: { create } as never });
+
+    await expect(adapter.generateProposal({ input: "input", signal })).resolves.toEqual(proposal);
+    expect(create.mock.calls[0]![0]).toEqual(expect.objectContaining({ model: "groq-test", response_format: { type: "json_object" }, temperature: 0 }));
+    expect((create.mock.calls[0]![0] as Record<string, unknown>).chat_template_kwargs).toBeUndefined();
+    expect(create.mock.calls[0]![1]).toEqual({ signal });
   });
 });

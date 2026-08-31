@@ -9,7 +9,7 @@ describe("API environment configuration", () => {
       PORT: 3001,
       DATABASE_URL: "postgresql://localhost:5432/tally",
       OPENAI_API_KEY: "",
-      GEMINI_API_KEY: "",
+      GROQ_API_KEY: "",
       OPENAI_MODEL: "gpt-5.6-terra",
       AI_PROVIDER: "openai",
       AI_REASONING_EFFORT: "none",
@@ -34,6 +34,8 @@ describe("API environment configuration", () => {
 
     expect(() => EnvSchema.parse({ PORT: "70000" })).toThrow();
     expect(() => EnvSchema.parse({ WEB_ORIGIN: "not-a-url" })).toThrow();
+    expect(loadConfig({ AI_BASE_URL: "" }).AI_BASE_URL).toBeUndefined();
+    expect(loadConfig({ AI_PROVIDER: "groq", AI_BASE_URL: "https://groq.example/v1" }).AI_BASE_URL).toBe("https://groq.example/v1");
   });
 
   it("selects a valid NVIDIA model when the OpenAI default is left unchanged", () => {
@@ -41,10 +43,10 @@ describe("API environment configuration", () => {
     expect(loadConfig({ AI_PROVIDER: "nvidia", OPENAI_MODEL: "nvidia/custom-model" }).OPENAI_MODEL).toBe("nvidia/custom-model");
   });
 
-  it("selects the Gemini default model and validates its production key", () => {
-    expect(loadConfig({ AI_PROVIDER: "gemini" }).OPENAI_MODEL).toBe("gemini-3.6-flash");
-    expect(() => loadConfig({ NODE_ENV: "production", AI_PROVIDER: "gemini", DATABASE_URL: "postgresql://db.example/tally", WEB_ORIGIN: "https://web.example" })).toThrow(/GEMINI_API_KEY/);
-    expect(loadConfig({ NODE_ENV: "production", AI_PROVIDER: "gemini", GEMINI_API_KEY: "gemini-key", DATABASE_URL: "postgresql://db.example/tally", WEB_ORIGIN: "https://web.example" }).OPENAI_MODEL).toBe("gemini-3.6-flash");
+  it("selects the Groq default model and validates its production key", () => {
+    expect(loadConfig({ AI_PROVIDER: "groq" }).OPENAI_MODEL).toBe("llama-3.3-70b-versatile");
+    expect(() => loadConfig({ NODE_ENV: "production", AI_PROVIDER: "groq", DATABASE_URL: "postgresql://db.example/tally", WEB_ORIGIN: "https://web.example" })).toThrow(/GROQ_API_KEY/);
+    expect(loadConfig({ NODE_ENV: "production", AI_PROVIDER: "groq", GROQ_API_KEY: "groq-key", DATABASE_URL: "postgresql://db.example/tally", WEB_ORIGIN: "https://web.example" }).OPENAI_MODEL).toBe("llama-3.3-70b-versatile");
   });
 
   it("requires a usable reasoning key in production", () => {

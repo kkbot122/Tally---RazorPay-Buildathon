@@ -52,9 +52,9 @@ See [DESIGN.md](DESIGN.md) for the frontend design system and route-level UI con
 ## Tech stack
 
 * **Frontend:** Next.js, React, Tailwind CSS, shadcn/ui, React Flow, Motion, Recharts, MDX
-* **Backend:** Fastify, TypeScript, Zod, `csv-parse`, `p-limit`
+* **Backend:** Fastify, TypeScript, Zod, `csv-parse`
 * **Database:** PostgreSQL + Drizzle ORM
-* **AI:** OpenAI Responses API with Structured Outputs
+* **AI:** OpenAI Responses API or OpenAI-compatible Chat Completions (Groq/NVIDIA)
 * **Testing:** Vitest, React Testing Library, Playwright
 * **Deployment:** Railway
 

@@ -15,7 +15,7 @@ export interface ReasoningModelAdapter {
 export type ReasoningAdapterErrorCode = "AI_REQUEST_ERROR" | "AI_SCHEMA_ERROR";
 
 export type ReasoningAdapterDiagnostics = {
-  provider: "openai" | "nvidia" | "gemini";
+  provider: "openai" | "nvidia" | "groq";
   model?: string;
   category?: "TIMEOUT" | "RATE_LIMIT" | "AUTHENTICATION" | "VALIDATION" | "SERVER" | "UNKNOWN";
   status?: number;
