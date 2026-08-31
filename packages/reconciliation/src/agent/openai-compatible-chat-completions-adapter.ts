@@ -173,11 +173,13 @@ function safeProviderErrorDetails(error: unknown): Pick<ReasoningAdapterDiagnost
   const cause = candidate.cause !== null && typeof candidate.cause === "object"
     ? candidate.cause as { message?: unknown; code?: unknown }
     : undefined;
-  const message = typeof candidate.message === "string"
-    ? candidate.message
-    : typeof cause?.message === "string"
-      ? cause.message
-      : undefined;
+  const primaryMessage = typeof candidate.message === "string" ? candidate.message : undefined;
+  const causeMessage = typeof cause?.message === "string" ? cause.message : undefined;
+  const message = primaryMessage === undefined
+    ? causeMessage
+    : causeMessage === undefined || causeMessage === primaryMessage
+      ? primaryMessage
+      : `${primaryMessage}; cause: ${causeMessage}`;
   const code = typeof candidate.code === "string"
     ? candidate.code
     : typeof cause?.code === "string"

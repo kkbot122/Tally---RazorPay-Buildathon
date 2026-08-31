@@ -167,7 +167,7 @@ describe("OpenAICompatibleChatCompletionsAdapter", () => {
         category: "UNKNOWN",
         errorName: "Error",
         errorCode: "ENOTFOUND",
-        errorMessage: "request failed with api_key=<REDACTED>",
+        errorMessage: "request failed with api_key=<REDACTED>; cause: getaddrinfo ENOTFOUND api.groq.com",
       },
     });
   });
