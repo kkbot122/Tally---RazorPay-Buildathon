@@ -13,17 +13,17 @@ export class PostgresGroqQuotaStateStore implements GroqQuotaStateStore {
   async update<T>(scope: string, operation: (state: GroqQuotaState) => { state: GroqQuotaState; result: T }): Promise<T> {
     return this.sql.begin(async (tx) => {
       await tx`select pg_advisory_xact_lock(hashtext(${scope}))`;
-      const rows = await tx<{ minuteStartedAt: Date; requestsInMinute: number; tokensInMinute: number; blockedUntil: Date | null }[]>`
+      const rows = await tx<{ minuteStartedAt: Date | string; requestsInMinute: number; tokensInMinute: number; blockedUntil: Date | string | null }[]>`
         select minute_started_at as "minuteStartedAt", requests_in_minute as "requestsInMinute", tokens_in_minute as "tokensInMinute", blocked_until as "blockedUntil"
         from groq_quota_state where scope = ${scope}`;
       const row = rows[0];
       const state = row === undefined
         ? EMPTY_STATE
         : {
-            minuteStartedAt: row.minuteStartedAt.getTime(),
+            minuteStartedAt: timestampMillis(row.minuteStartedAt),
             requestsInMinute: row.requestsInMinute,
             tokensInMinute: row.tokensInMinute,
-            blockedUntil: row.blockedUntil?.getTime() ?? 0,
+            blockedUntil: row.blockedUntil === null ? 0 : timestampMillis(row.blockedUntil),
           };
       const outcome = operation(state);
       // postgres.js serializes values differently across runtimes. Bind text
@@ -43,4 +43,10 @@ export class PostgresGroqQuotaStateStore implements GroqQuotaStateStore {
       return outcome.result;
     }) as Promise<T>;
   }
+}
+
+function timestampMillis(value: Date | string): number {
+  const timestamp = value instanceof Date ? value.getTime() : Date.parse(value);
+  if (Number.isNaN(timestamp)) throw new Error("Postgres returned an invalid Groq quota timestamp");
+  return timestamp;
 }
