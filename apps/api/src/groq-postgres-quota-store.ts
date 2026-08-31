@@ -26,9 +26,14 @@ export class PostgresGroqQuotaStateStore implements GroqQuotaStateStore {
             blockedUntil: row.blockedUntil?.getTime() ?? 0,
           };
       const outcome = operation(state);
+      // postgres.js serializes values differently across runtimes. Bind text
+      // timestamps explicitly so the shared limiter never passes Date objects
+      // into its binary encoder before the model request is sent.
+      const minuteStartedAt = new Date(outcome.state.minuteStartedAt).toISOString();
+      const blockedUntil = outcome.state.blockedUntil === 0 ? null : new Date(outcome.state.blockedUntil).toISOString();
       await tx`
         insert into groq_quota_state (scope, minute_started_at, requests_in_minute, tokens_in_minute, blocked_until, updated_at)
-        values (${scope}, ${new Date(outcome.state.minuteStartedAt)}, ${outcome.state.requestsInMinute}, ${outcome.state.tokensInMinute}, ${outcome.state.blockedUntil === 0 ? null : new Date(outcome.state.blockedUntil)}, now())
+        values (${scope}, ${minuteStartedAt}, ${outcome.state.requestsInMinute}, ${outcome.state.tokensInMinute}, ${blockedUntil}, now())
         on conflict (scope) do update set
           minute_started_at = excluded.minute_started_at,
           requests_in_minute = excluded.requests_in_minute,
