@@ -19,12 +19,32 @@ type PreparedReasoningItem = {
   caseId: string;
   candidateSet: CandidateSet;
   promptInput: Awaited<ReturnType<typeof buildReconciliationReasoningInput>>;
+  skipReciprocalAttempt: boolean;
+};
+
+type ReasoningDiagnostics = {
+  callsStarted: number;
+  repairCallsStarted: number;
+  callBudgetSkips: number;
+  reciprocalSkips: number;
+  candidatesPruned: number;
+  verificationRejections: number;
+  verificationFailures: Record<string, number>;
 };
 
 export async function runReconciliation(input: RunReconciliationInput): Promise<ReconciliationRunResult> {
   const reasoningConcurrency = validateReasoningConcurrency(input.reasoningConcurrency);
   const maxReasoningCalls = validateMaxReasoningCalls(input.maxReasoningCalls);
   let reasoningCalls = 0;
+  const reasoningDiagnostics: ReasoningDiagnostics = {
+    callsStarted: 0,
+    repairCallsStarted: 0,
+    callBudgetSkips: 0,
+    reciprocalSkips: 0,
+    candidatesPruned: 0,
+    verificationRejections: 0,
+    verificationFailures: {},
+  };
   const requestProposal: RunReconciliationInput["modelAdapter"]["generateProposal"] = (modelInput) => {
     if (reasoningCalls >= maxReasoningCalls) {
       throw new ReasoningAdapterError("AI_REQUEST_ERROR", "The reconciliation run exhausted its model-call budget.", {
@@ -32,6 +52,7 @@ export async function runReconciliation(input: RunReconciliationInput): Promise<
       });
     }
     reasoningCalls += 1;
+    reasoningDiagnostics.callsStarted += 1;
     return input.modelAdapter.generateProposal(modelInput);
   };
   // T022 retains an envelope timestamp for compatibility, but T023 ordering is
@@ -129,6 +150,7 @@ export async function runReconciliation(input: RunReconciliationInput): Promise<
     .filter((decision): decision is Extract<DeterministicDecision, { status: "NEEDS_REASONING" }> => decision.status === "NEEDS_REASONING")
     .sort(compareReasoningDecisions);
   const usedRecords = cloneUsedRecords(deterministic.usedRecords);
+  const attemptedSingletonPairs = new Set<string>();
 
   for (let waveStart = 0; waveStart < reasoningDecisions.length; waveStart += reasoningConcurrency) {
     throwIfAborted(input.signal);
@@ -142,12 +164,17 @@ export async function runReconciliation(input: RunReconciliationInput): Promise<
       if (finalizedPrimaries.has(primaryKeyValue) || isUsed(primary, waveSnapshot)) continue;
 
       const currentCaseId = startCase(primary.side, primary.recordId);
-      const candidateSet = generateCandidates({
+      const generatedCandidateSet = generateCandidates({
         primary,
         records,
         usedRecords: waveSnapshot,
         requiredCandidateIds: decision.bankRecordIds.concat(decision.ledgerRecordIds),
       });
+      const { candidateSet, prunedCount } = pruneCandidatesForReasoning(generatedCandidateSet);
+      reasoningDiagnostics.candidatesPruned += prunedCount;
+      const singletonPair = singletonPairKey(primary, candidateSet);
+      const skipReciprocalAttempt = singletonPair !== undefined && attemptedSingletonPairs.has(singletonPair);
+      if (singletonPair !== undefined && !skipReciprocalAttempt) attemptedSingletonPairs.add(singletonPair);
       trace.record({
         type: "CANDIDATES_GENERATED",
         caseId: currentCaseId,
@@ -170,10 +197,17 @@ export async function runReconciliation(input: RunReconciliationInput): Promise<
           records,
           runContext: { asOfDate: input.asOfDate },
         }),
+        skipReciprocalAttempt,
       });
     }
 
     const settlements = await Promise.allSettled(preparedItems.map(async (item) => {
+      if (item.skipReciprocalAttempt) {
+        reasoningDiagnostics.reciprocalSkips += 1;
+        const fallback = reciprocalAttemptProposal(item.primary);
+        trace.record({ type: "AGENT_PROPOSED", caseId: item.caseId, payload: fallback });
+        return fallback;
+      }
       trace.record({
         type: "AGENT_STARTED",
         caseId: item.caseId,
@@ -184,7 +218,9 @@ export async function runReconciliation(input: RunReconciliationInput): Promise<
         },
       });
       try {
-        return await generateProposalWithVerifierRetry(item, requestProposal, records, input.asOfDate, waveSnapshot, trace, input.signal);
+        return await generateProposalWithVerifierRetry(item, requestProposal, records, input.asOfDate, waveSnapshot, trace, input.signal, () => {
+          reasoningDiagnostics.repairCallsStarted += 1;
+        });
       } catch (error) {
         if (input.signal?.aborted) throw new ReconciliationRunAbortedError(abortReason(input.signal));
         if (!(error instanceof ReasoningAdapterError) || (error.code !== "AI_SCHEMA_ERROR" && error.code !== "AI_REQUEST_ERROR")) throw error;
@@ -193,6 +229,7 @@ export async function runReconciliation(input: RunReconciliationInput): Promise<
         // disguise it as an agent-produced abstention: callers must be able to
         // distinguish unavailable inference from a genuine model conclusion.
         if (error.code === "AI_REQUEST_ERROR" && error.diagnostics?.category !== "CALL_BUDGET") throw error;
+        if (error.diagnostics?.category === "CALL_BUDGET") reasoningDiagnostics.callBudgetSkips += 1;
         const fallback = insufficientEvidenceProposal(item.primary, error.code);
         trace.record({ type: "AGENT_PROPOSED", caseId: item.caseId, payload: fallback });
         return fallback;
@@ -206,11 +243,11 @@ export async function runReconciliation(input: RunReconciliationInput): Promise<
         attachTrace(settlement.reason, trace);
         throw settlement.reason;
       }
-      finalizeAgentProposal(item, settlement.value, records, input.runId, input.asOfDate, usedRecords, finalizedPrimaries, results, trace, input.onVerificationFailure);
+      finalizeAgentProposal(item, settlement.value, records, input.runId, input.asOfDate, usedRecords, finalizedPrimaries, results, trace, input.onVerificationFailure, reasoningDiagnostics);
     }
   }
 
-  trace.record({ type: "RUN_COMPLETED", payload: { casesProcessed: results.length } });
+  trace.record({ type: "RUN_COMPLETED", payload: { casesProcessed: results.length, reasoning: reasoningDiagnostics } });
   return { runId: input.runId, results, usedRecords, trace: trace.getEvents() };
 }
 
@@ -247,9 +284,16 @@ function finalizeAgentProposal(
   results: FinalReconciliationResult[],
   trace: TraceRecorder,
   onVerificationFailure?: RunReconciliationInput["onVerificationFailure"],
+  reasoningDiagnostics?: ReasoningDiagnostics,
 ): void {
   const verification = verifyAgentProposal(item, proposal, records, asOfDate, usedRecords);
   if (verification.status === "REJECTED") {
+    if (reasoningDiagnostics !== undefined) {
+      reasoningDiagnostics.verificationRejections += 1;
+      for (const failure of verification.failures) {
+        reasoningDiagnostics.verificationFailures[failure.code] = (reasoningDiagnostics.verificationFailures[failure.code] ?? 0) + 1;
+      }
+    }
     onVerificationFailure?.({
       runId,
       caseId: item.caseId,
@@ -276,7 +320,7 @@ function finalizeAgentProposal(
   consumeFinalResult(result, item.primary, usedRecords, finalizedPrimaries);
 }
 
-function isStructuralModelFailure(code: string): boolean {
+function isRepairableModelFailure(code: string): boolean {
   return new Set([
     "NOT_RECONCILED_PROPOSAL",
     "UNKNOWN_RECORD",
@@ -284,6 +328,9 @@ function isStructuralModelFailure(code: string): boolean {
     "PRIMARY_NOT_INCLUDED",
     "DUPLICATE_RECORD_ID",
     "INVALID_RELATIONSHIP_SHAPE",
+    "CONFLICTING_EVIDENCE",
+    "AMOUNT_MISMATCH",
+    "INSUFFICIENT_EVIDENCE",
   ]).has(code);
 }
 
@@ -295,18 +342,20 @@ async function generateProposalWithVerifierRetry(
   usedRecords: UsedRecordState,
   trace: TraceRecorder,
   signal?: AbortSignal,
+  onRepair?: () => void,
 ): Promise<AgentProposal> {
   let proposal = await requestProposal({ ...item.promptInput, signal });
   trace.record({ type: "AGENT_PROPOSED", caseId: item.caseId, payload: proposal });
 
   for (let attempt = 0; attempt < 1; attempt += 1) {
     const verification = verifyAgentProposal(item, proposal, records, asOfDate, usedRecords);
-    if (verification.status !== "REJECTED" || !verification.failures.some((failure) => isStructuralModelFailure(failure.code))) return proposal;
+    if (verification.status !== "REJECTED" || !verification.failures.some((failure) => isRepairableModelFailure(failure.code))) return proposal;
     const feedback = verification.failures.map((failure) => ({
       code: failure.code,
       message: failure.message,
       recordIds: failure.recordIds ?? [],
     }));
+    onRepair?.();
     proposal = await requestProposal({
       ...item.promptInput,
       retryFeedback: JSON.stringify({ caseId: item.caseId, proposedBankRecordIds: proposal.bankRecordIds, proposedLedgerRecordIds: proposal.ledgerRecordIds, verifierFailures: feedback }),
@@ -315,6 +364,25 @@ async function generateProposalWithVerifierRetry(
     trace.record({ type: "AGENT_PROPOSED", caseId: item.caseId, payload: proposal });
   }
   return proposal;
+}
+
+function pruneCandidatesForReasoning(candidateSet: CandidateSet): { candidateSet: CandidateSet; prunedCount: number } {
+  if (!candidateSet.candidates.some((candidate) => candidate.facts.exactAmount)) return { candidateSet, prunedCount: 0 };
+  // Preserve batch candidates because an individual amount mismatch can still
+  // participate in a verified grouped relationship. Other mismatches are
+  // dominated when an exact-amount alternative is already available.
+  const candidates = candidateSet.candidates.filter((candidate) => candidate.facts.exactAmount || candidate.selectionTier === "EXACT_BATCH");
+  const prunedCount = candidateSet.candidates.length - candidates.length;
+  if (prunedCount === 0) return { candidateSet, prunedCount };
+  return { candidateSet: { ...candidateSet, candidates, truncated: true }, prunedCount };
+}
+
+function singletonPairKey(primary: CandidatePrimary, candidateSet: CandidateSet): string | undefined {
+  if (candidateSet.candidates.length !== 1) return undefined;
+  const candidate = candidateSet.candidates[0]!;
+  const bankRecordId = primary.side === "BANK" ? primary.recordId : candidate.recordId;
+  const ledgerRecordId = primary.side === "LEDGER" ? primary.recordId : candidate.recordId;
+  return `${bankRecordId}\u0000${ledgerRecordId}`;
 }
 
 function verifyAgentProposal(
@@ -363,6 +431,25 @@ function insufficientEvidenceProposal(primary: CandidatePrimary, failureCode = "
     }],
     conflictingEvidence: [],
     reason: `The model response failed with ${failureCode}, so this case remains unresolved.`,
+  };
+}
+
+function reciprocalAttemptProposal(primary: CandidatePrimary): AgentProposal {
+  const bankRecordIds = primary.side === "BANK" ? [primary.recordId] : [];
+  const ledgerRecordIds = primary.side === "LEDGER" ? [primary.recordId] : [];
+  return {
+    proposedOutcome: "INSUFFICIENT_EVIDENCE",
+    bankRecordIds,
+    ledgerRecordIds,
+    confidence: "LOW",
+    evidence: [{
+      statement: "The same one-to-one relationship was already evaluated from its reciprocal record.",
+      source: "DETERMINISTIC",
+      kind: "DETERMINISTIC",
+      recordIds: [...bankRecordIds, ...ledgerRecordIds],
+    }],
+    conflictingEvidence: [],
+    reason: "The reciprocal candidate relationship was already evaluated, so this duplicate model request was skipped.",
   };
 }
 

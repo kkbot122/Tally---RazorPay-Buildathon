@@ -169,7 +169,7 @@ describe("T034 core engine safety invariants", () => {
 
   it("caps all model calls in a run, including calls scheduled concurrently", async () => {
     let calls = 0;
-    await runCase(
+    const result = await runCase(
       [{ id: "B1", amount: "100.00", reference: "BANK-1" }, { id: "B2", amount: "200.00", reference: "BANK-2" }],
       [{ id: "L1", amount: "100.00", reference: "LEDGER-1" }, { id: "L2", amount: "100.00", reference: "LEDGER-2" }, { id: "L3", amount: "200.00", reference: "LEDGER-3" }, { id: "L4", amount: "200.00", reference: "LEDGER-4" }],
       { generateProposal: async ({ input }) => { calls += 1; return { ...proposalFor(primaryId(input), []), proposedOutcome: "INSUFFICIENT_EVIDENCE", confidence: "LOW" }; } },
@@ -177,6 +177,10 @@ describe("T034 core engine safety invariants", () => {
       1,
     );
     expect(calls).toBe(1);
+    expect(result.trace.at(-1)).toMatchObject({
+      type: "RUN_COMPLETED",
+      payload: { reasoning: { callsStarted: 1, callBudgetSkips: 1, repairCallsStarted: 0 } },
+    });
   });
 
   it("prevents record reuse after an accepted reconciliation", async () => {
@@ -198,8 +202,67 @@ describe("T034 core engine safety invariants", () => {
         return proposalFor("B1", ["L1"]);
       } },
     );
-    expect(calls).toBe(4);
+    expect(calls).toBe(2);
     expect(result.results.find((item) => item.caseId === "BANK:B1")).toMatchObject({ outcome: "RECONCILED" });
+  });
+
+  it("retries an amount-mismatched proposal with verifier feedback and accepts a valid alternative", async () => {
+    let calls = 0;
+    let sawAmountFeedback = false;
+    const result = await runCase(
+      [{ id: "B1", amount: "100.00", reference: "REF-1" }],
+      [
+        { id: "L-WRONG", amount: "99.99", reference: "REF-1" },
+        { id: "L-RIGHT", amount: "100.00", reference: "OTHER", counterparty: "Other" },
+      ],
+      { generateProposal: async ({ retryFeedback }) => {
+        calls += 1;
+        if (retryFeedback === undefined) return proposalFor("B1", ["L-WRONG"]);
+        expect(retryFeedback).toContain("AMOUNT_MISMATCH");
+        sawAmountFeedback = true;
+        return proposalFor("B1", ["L-RIGHT"]);
+      } },
+    );
+
+    expect(calls).toBe(4);
+    expect(sawAmountFeedback).toBe(true);
+    expect(result.results.find((item) => item.caseId === "BANK:B1")).toMatchObject({ outcome: "RECONCILED", ledgerRecordIds: ["L-RIGHT"] });
+  });
+
+  it("does not spend a second model call on an already attempted one-to-one reciprocal pair", async () => {
+    let calls = 0;
+    const result = await runCase(
+      [{ id: "B1", amount: "100.00", reference: "REF-1" }],
+      [{ id: "L1", amount: "99.99", reference: "REF-1" }],
+      { generateProposal: async ({ input }) => {
+        calls += 1;
+        return input.includes('"primary":{"side":"BANK"')
+          ? { ...proposalFor("B1", []), proposedOutcome: "INSUFFICIENT_EVIDENCE", confidence: "LOW" }
+          : { ...proposalFor("", ["L1"]), bankRecordIds: [], proposedOutcome: "INSUFFICIENT_EVIDENCE", confidence: "LOW" };
+      } },
+    );
+
+    expect(calls).toBe(1);
+    expect(result.results).toHaveLength(2);
+  });
+
+  it("keeps an exact-amount alternative and omits a dominated amount mismatch from model context", async () => {
+    const prompts: string[] = [];
+    await runCase(
+      [{ id: "B1", amount: "100.00", reference: "REF-1" }],
+      [
+        { id: "L-WRONG", amount: "99.99", reference: "REF-1" },
+        { id: "L-RIGHT", amount: "100.00", reference: "OTHER", counterparty: "Other" },
+      ],
+      { generateProposal: async ({ input }) => {
+        prompts.push(input);
+        return proposalFor("B1", ["L-RIGHT"]);
+      } },
+    );
+
+    const bankPrompt = prompts.find((input) => input.includes('"primary":{"side":"BANK"'));
+    expect(bankPrompt).toContain("L-RIGHT");
+    expect(bankPrompt).not.toContain("L-WRONG");
   });
 
   it("isolates exhausted model schema failures as unresolved cases", async () => {

@@ -78,6 +78,15 @@ export type TraceEventPayload = {
   };
   RUN_COMPLETED: {
     casesProcessed?: number;
+    reasoning?: {
+      callsStarted: number;
+      repairCallsStarted: number;
+      callBudgetSkips: number;
+      reciprocalSkips: number;
+      candidatesPruned: number;
+      verificationRejections: number;
+      verificationFailures: Record<string, number>;
+    };
   };
 };
 
