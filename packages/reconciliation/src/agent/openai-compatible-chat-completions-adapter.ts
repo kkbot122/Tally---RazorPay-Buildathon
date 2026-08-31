@@ -104,7 +104,13 @@ export class OpenAICompatibleChatCompletionsAdapter implements ReasoningModelAda
           }
           throw new ReasoningAdapterError("AI_REQUEST_ERROR", `The ${this.provider} reasoning request failed.`, {
             cause: error,
-            diagnostics: { provider: this.provider, model: this.model, durationMs: Date.now() - startedAt, ...classified },
+            diagnostics: {
+              provider: this.provider,
+              model: this.model,
+              durationMs: Date.now() - startedAt,
+              ...classified,
+              ...safeProviderErrorDetails(error),
+            },
           });
         }
       }
@@ -159,6 +165,36 @@ function classifyProviderError(error: unknown): Pick<ReasoningAdapterDiagnostics
   if (status !== undefined && status >= 500) return { status, category: "SERVER" };
   if (error instanceof Error && (error.name === "AbortError" || /timed out|timeout/i.test(error.message))) return { category: "TIMEOUT" };
   return { category: "UNKNOWN" };
+}
+
+function safeProviderErrorDetails(error: unknown): Pick<ReasoningAdapterDiagnostics, "errorName" | "errorMessage" | "errorCode"> {
+  if (error === null || typeof error !== "object") return {};
+  const candidate = error as { name?: unknown; message?: unknown; code?: unknown; cause?: unknown };
+  const cause = candidate.cause !== null && typeof candidate.cause === "object"
+    ? candidate.cause as { message?: unknown; code?: unknown }
+    : undefined;
+  const message = typeof candidate.message === "string"
+    ? candidate.message
+    : typeof cause?.message === "string"
+      ? cause.message
+      : undefined;
+  const code = typeof candidate.code === "string"
+    ? candidate.code
+    : typeof cause?.code === "string"
+      ? cause.code
+      : undefined;
+  return {
+    ...(typeof candidate.name === "string" ? { errorName: candidate.name } : {}),
+    ...(message === undefined ? {} : { errorMessage: redactSecrets(message).slice(0, 500) }),
+    ...(code === undefined ? {} : { errorCode: redactSecrets(code).slice(0, 120) }),
+  };
+}
+
+function redactSecrets(value: string): string {
+  return value
+    .replace(/(authorization\s*[:=]\s*bearer\s+)[^\s,;]+/gi, "$1<REDACTED>")
+    .replace(/(api[_-]?key\s*[:=]\s*)[^\s,;]+/gi, "$1<REDACTED>")
+    .replace(/\b(?:gsk|sk)-[A-Za-z0-9_-]+\b/g, "<REDACTED>");
 }
 
 function quotaDimension(error: unknown): "RPM" | "TPM" | "RPD" | "TPD" | undefined {

@@ -189,6 +189,10 @@ export async function runReconciliation(input: RunReconciliationInput): Promise<
         if (input.signal?.aborted) throw new ReconciliationRunAbortedError(abortReason(input.signal));
         if (!(error instanceof ReasoningAdapterError) || (error.code !== "AI_SCHEMA_ERROR" && error.code !== "AI_REQUEST_ERROR")) throw error;
         input.onModelFailure?.({ runId: input.runId, caseId: item.caseId, failureCode: error.code, diagnostics: error.diagnostics });
+        // A request failure means there was no model decision at all. Do not
+        // disguise it as an agent-produced abstention: callers must be able to
+        // distinguish unavailable inference from a genuine model conclusion.
+        if (error.code === "AI_REQUEST_ERROR" && error.diagnostics?.category !== "CALL_BUDGET") throw error;
         const fallback = insufficientEvidenceProposal(item.primary, error.code);
         trace.record({ type: "AGENT_PROPOSED", caseId: item.caseId, payload: fallback });
         return fallback;

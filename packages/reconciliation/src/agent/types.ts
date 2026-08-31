@@ -23,6 +23,10 @@ export type ReasoningAdapterDiagnostics = {
   rateLimitDimension?: GroqQuotaDimension;
   status?: number;
   durationMs?: number;
+  /** Safe summary of a provider or transport failure; never includes credentials. */
+  errorName?: string;
+  errorMessage?: string;
+  errorCode?: string;
 };
 
 export class ReasoningAdapterError extends Error {

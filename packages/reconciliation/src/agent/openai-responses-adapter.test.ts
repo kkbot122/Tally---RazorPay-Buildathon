@@ -155,6 +155,23 @@ describe("OpenAICompatibleChatCompletionsAdapter", () => {
     });
   });
 
+  it("includes a redacted transport failure summary in Groq diagnostics", async () => {
+    const providerError = Object.assign(new Error("request failed with api_key=gsk_live-secret"), {
+      code: "ENOTFOUND",
+      cause: Object.assign(new Error("getaddrinfo ENOTFOUND api.groq.com"), { code: "ENOTFOUND" }),
+    });
+    const adapter = new OpenAICompatibleChatCompletionsAdapter({ client: { create: vi.fn().mockRejectedValue(providerError) } as never });
+
+    await expect(adapter.generateProposal({ input: "input" })).rejects.toMatchObject({
+      diagnostics: {
+        category: "UNKNOWN",
+        errorName: "Error",
+        errorCode: "ENOTFOUND",
+        errorMessage: "request failed with api_key=<REDACTED>",
+      },
+    });
+  });
+
   it("uses Groq token-reset headers for a shared retry cooldown without a 30-second cap", async () => {
     const headers = new Headers({ "retry-after": "60", "x-ratelimit-reset-tokens": "90s", "x-ratelimit-remaining-tokens": "0" });
     const providerError = Object.assign(new Error("token quota exceeded"), { status: 429, headers });

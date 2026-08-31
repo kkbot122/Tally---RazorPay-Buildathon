@@ -283,7 +283,7 @@ describe("reconciliation routes", () => {
     await app.close();
   });
 
-  it("persists an unresolved result when the model boundary fails", async () => {
+  it("marks the run failed when the model boundary fails instead of persisting fabricated results", async () => {
     const repository = {
       startRun: vi.fn(async () => {}),
       markRunFailed: vi.fn(async () => {}),
@@ -304,10 +304,11 @@ describe("reconciliation routes", () => {
     } });
     expect(response.statusCode).toBe(202);
     expect(response.json()).toEqual({ runId: "run-ai-failure", status: "PROCESSING" });
-    await vi.waitFor(() => expect(repository.saveCompletedRun).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(repository.markRunFailed).toHaveBeenCalledOnce());
     expect(response.body).not.toContain("OPENAI_API_KEY");
     expect(repository.startRun).toHaveBeenCalledOnce();
-    expect(repository.markRunFailed).not.toHaveBeenCalled();
+    expect(repository.saveCompletedRun).not.toHaveBeenCalled();
+    expect(repository.markRunFailed).toHaveBeenCalledWith("run-ai-failure", "AI_REQUEST_ERROR", expect.any(Array));
     await app.close();
   });
 
@@ -337,8 +338,9 @@ describe("reconciliation routes", () => {
       expect(repository.markRunFailed).not.toHaveBeenCalled();
     } else {
       expect(response.statusCode).toBe(202);
-      await vi.waitFor(() => expect(repository.saveCompletedRun).toHaveBeenCalledOnce());
-      expect(repository.markRunFailed).not.toHaveBeenCalled();
+      await vi.waitFor(() => expect(repository.markRunFailed).toHaveBeenCalledOnce());
+      expect(repository.saveCompletedRun).not.toHaveBeenCalled();
+      expect(repository.markRunFailed).toHaveBeenCalledWith("run-openai-provider-rejection", "AI_REQUEST_ERROR", expect.any(Array));
     }
     await app.close();
   });
