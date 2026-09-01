@@ -31,6 +31,20 @@ export function createReconciliationJobWorker(options: ReconciliationJobWorkerOp
   const pollIntervalMs = positiveInt(options.pollIntervalMs ?? 1_000, "pollIntervalMs");
   let stopped = false;
   const controllers = new Map<string, Set<AbortController>>();
+  let firstRecoveryDiagnostic = true;
+  let firstClaimDiagnostic = true;
+  let lastDiagnosticAt = Date.now();
+  let diagnosticStage = "created";
+  let lastRecoverableRunCount: number | undefined;
+  let lastClaim: { runId?: string; outcome: "claimed" | "empty"; durationMs: number } | undefined;
+
+  function diagnostic(message: string, metadata: Record<string, unknown>): void {
+    console.info(`[DEBUG-worker-a91f] ${message}`, metadata);
+  }
+
+  function stalledCall(stage: "getRecoverableRunIds" | "claimWorkItem", started: number, runId?: string): ReturnType<typeof setTimeout> {
+    return setTimeout(() => diagnostic(`${stage} still pending`, { runId, durationMs: Date.now() - started }), 10_000);
+  }
 
   async function processOne(item: ReconciliationWorkItem): Promise<void> {
     const started = Date.now();
@@ -77,7 +91,24 @@ export function createReconciliationJobWorker(options: ReconciliationJobWorkerOp
   async function runOnce(runId?: string): Promise<number> {
     const tasks: Promise<void>[] = [];
     for (let index = 0; index < concurrency; index += 1) {
-      const item = await repository.claimWorkItem!({ runId, owner, leaseMs });
+      diagnosticStage = "claimWorkItem";
+      const started = Date.now();
+      const logFirstClaim = firstClaimDiagnostic;
+      if (logFirstClaim) {
+        diagnostic("claimWorkItem started", { runId });
+        firstClaimDiagnostic = false;
+      }
+      const stalled = stalledCall("claimWorkItem", started, runId);
+      let item: ReconciliationWorkItem | undefined;
+      try {
+        item = await repository.claimWorkItem!({ runId, owner, leaseMs });
+      } finally {
+        clearTimeout(stalled);
+      }
+      lastClaim = { runId, outcome: item === undefined ? "empty" : "claimed", durationMs: Date.now() - started };
+      if (logFirstClaim) {
+        diagnostic("claimWorkItem completed", lastClaim);
+      }
       if (item === undefined) break;
       tasks.push(processOne(item));
     }
@@ -86,6 +117,7 @@ export function createReconciliationJobWorker(options: ReconciliationJobWorkerOp
   }
 
   async function run(runId?: string): Promise<void> {
+    diagnostic("worker started", { owner, concurrency, pollIntervalMs });
     while (!stopped) {
       let count = 0;
       let stage: "getRecoverableRunIds" | "claimWorkItem" = runId === undefined && repository.getRecoverableRunIds !== undefined
@@ -95,7 +127,25 @@ export function createReconciliationJobWorker(options: ReconciliationJobWorkerOp
         if (runId !== undefined || repository.getRecoverableRunIds === undefined) {
           count = await runOnce(runId);
         } else {
-          for (const recoverableRunId of await repository.getRecoverableRunIds()) {
+          diagnosticStage = "getRecoverableRunIds";
+          const started = Date.now();
+          const logFirstRecovery = firstRecoveryDiagnostic;
+          if (logFirstRecovery) {
+            diagnostic("getRecoverableRunIds started", {});
+            firstRecoveryDiagnostic = false;
+          }
+          const stalled = stalledCall("getRecoverableRunIds", started);
+          let recoverableRunIds: string[];
+          try {
+            recoverableRunIds = await repository.getRecoverableRunIds();
+          } finally {
+            clearTimeout(stalled);
+          }
+          lastRecoverableRunCount = recoverableRunIds.length;
+          if (logFirstRecovery) {
+            diagnostic("getRecoverableRunIds completed", { count: recoverableRunIds.length, durationMs: Date.now() - started });
+          }
+          for (const recoverableRunId of recoverableRunIds) {
             stage = "claimWorkItem";
             count += await runOnce(recoverableRunId);
           }
@@ -104,6 +154,10 @@ export function createReconciliationJobWorker(options: ReconciliationJobWorkerOp
         console.error(`[reconciliation-worker] ${stage} failed`, error);
         // A transient database failure must not silently kill the durable
         // worker; the next poll can reclaim the pending item.
+      }
+      if (Date.now() - lastDiagnosticAt >= 30_000) {
+        diagnostic("worker heartbeat", { stage: diagnosticStage, recoverableRunCount: lastRecoverableRunCount, lastClaim });
+        lastDiagnosticAt = Date.now();
       }
       if (count === 0) await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
     }

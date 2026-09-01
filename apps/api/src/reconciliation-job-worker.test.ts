@@ -121,6 +121,45 @@ describe("reconciliation job worker", () => {
     expect(repo.claimWorkItem).toHaveBeenCalledWith({ runId: "run", owner: "worker", leaseMs: 60_000 });
   });
 
+  it("reports worker startup, recovery results, and empty claims for production diagnosis", async () => {
+    const log = vi.spyOn(console, "info").mockImplementation(() => {});
+    const repo = repository(async () => undefined);
+    let worker!: ReturnType<typeof createReconciliationJobWorker>;
+    repo.getRecoverableRunIds = vi.fn(async () => ["run"]);
+    repo.claimWorkItem = vi.fn(async () => {
+      worker.stop();
+      return undefined;
+    });
+    worker = createReconciliationJobWorker({ repository: repo, owner: "worker", pollIntervalMs: 1, processWorkItem: async () => {} });
+
+    await worker.run();
+
+    expect(log).toHaveBeenCalledWith("[DEBUG-worker-a91f] worker started", { owner: "worker", concurrency: 1, pollIntervalMs: 1 });
+    expect(log).toHaveBeenCalledWith("[DEBUG-worker-a91f] getRecoverableRunIds completed", expect.objectContaining({ count: 1 }));
+    expect(log).toHaveBeenCalledWith("[DEBUG-worker-a91f] claimWorkItem completed", expect.objectContaining({ runId: "run", outcome: "empty" }));
+    log.mockRestore();
+  });
+
+  it("reports a recoverable-run query that remains pending for ten seconds", async () => {
+    vi.useFakeTimers();
+    const log = vi.spyOn(console, "info").mockImplementation(() => {});
+    let resolveRecovery!: (runIds: string[]) => void;
+    const repo = repository(async () => undefined);
+    repo.getRecoverableRunIds = vi.fn(() => new Promise<string[]>((resolve) => { resolveRecovery = resolve; }));
+    const worker = createReconciliationJobWorker({ repository: repo, owner: "worker", pollIntervalMs: 1, processWorkItem: async () => {} });
+
+    const running = worker.run();
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    expect(log).toHaveBeenCalledWith("[DEBUG-worker-a91f] getRecoverableRunIds still pending", expect.objectContaining({ durationMs: 10_000 }));
+    worker.stop();
+    resolveRecovery([]);
+    await vi.advanceTimersByTimeAsync(1);
+    await running;
+    log.mockRestore();
+    vi.useRealTimers();
+  });
+
   it("aborts in-flight provider work when its run is cancelled", async () => {
     const repo = repository(async () => item());
     let entered!: () => void;
