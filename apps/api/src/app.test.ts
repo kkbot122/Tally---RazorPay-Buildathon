@@ -7,17 +7,14 @@ import { createReconciliationRunService, RunFailedError, TraceUnavailableError }
 import type { ReconciliationRunRepository } from "./db/reconciliation-run-repository.js";
 import type { PersistCompletedRunInput } from "./db/reconciliation-run-repository.js";
 import { buildDevFixture, type BenchmarkCase } from "@tally/benchmark";
-import { OpenAIResponsesAdapter, ReasoningAdapterError, type AgentProposal, type ReasoningModelAdapter } from "@tally/reconciliation";
+import { GroqReasoningAdapter, ReasoningAdapterError, type AgentProposal, type ReasoningModelAdapter } from "@tally/reconciliation";
 
 const config = {
   NODE_ENV: "test" as const,
   PORT: 3001,
   DATABASE_URL: "postgresql://localhost:5432/tally",
-  OPENAI_API_KEY: "",
   GROQ_API_KEY: "",
-  OPENAI_MODEL: "gpt-5.6-terra",
-  AI_PROVIDER: "openai" as const,
-  AI_REASONING_EFFORT: "none" as const,
+  GROQ_MODEL: "openai/gpt-oss-120b",
   AI_REQUEST_TIMEOUT_MS: 12000,
   AI_MAX_RETRIES: 0,
   AI_REASONING_CONCURRENCY: 8,
@@ -293,7 +290,7 @@ describe("reconciliation routes", () => {
       getTraceForRun: vi.fn(async () => []),
     } satisfies ReconciliationRunRepository;
     const adapter: ReasoningModelAdapter = {
-      generateProposal: vi.fn(async () => { throw new ReasoningAdapterError("AI_REQUEST_ERROR", "OPENAI_API_KEY=sentinel"); }),
+      generateProposal: vi.fn(async () => { throw new ReasoningAdapterError("AI_REQUEST_ERROR", "GROQ_API_KEY=sentinel"); }),
     };
     const service = createReconciliationRunService(repository, adapter, undefined, () => "run-ai-failure");
     const app = buildApp(config, createTestDatabase(), service);
@@ -305,7 +302,7 @@ describe("reconciliation routes", () => {
     expect(response.statusCode).toBe(202);
     expect(response.json()).toEqual({ runId: "run-ai-failure", status: "PROCESSING" });
     await vi.waitFor(() => expect(repository.markRunFailed).toHaveBeenCalledOnce());
-    expect(response.body).not.toContain("OPENAI_API_KEY");
+    expect(response.body).not.toContain("GROQ_API_KEY");
     expect(repository.startRun).toHaveBeenCalledOnce();
     expect(repository.saveCompletedRun).not.toHaveBeenCalled();
     expect(repository.markRunFailed).toHaveBeenCalledWith("run-ai-failure", "AI_REQUEST_ERROR", expect.any(Array));
@@ -313,9 +310,9 @@ describe("reconciliation routes", () => {
   });
 
   it.each([
-    ["malformed output", async () => ({ output_parsed: null })],
+    ["malformed output", async () => ({ choices: [{ message: { content: "not-json" } }], usage: { total_tokens: 1 } })],
     ["provider rejection", async () => { throw new Error("provider detail"); }],
-  ])("maps the real OpenAI adapter %s through the API boundary", async (_name, parse) => {
+  ])("maps the real Groq adapter %s through the API boundary", async (_name, create) => {
     const repository = {
       startRun: vi.fn(async () => {}),
       markRunFailed: vi.fn(async () => {}),
@@ -324,8 +321,8 @@ describe("reconciliation routes", () => {
       getResultsForRun: vi.fn(async () => []),
       getTraceForRun: vi.fn(async () => []),
     } satisfies ReconciliationRunRepository;
-    const adapter = new OpenAIResponsesAdapter({ client: { parse } as never });
-    const service = createReconciliationRunService(repository, adapter, undefined, () => `run-openai-${_name.replace(" ", "-")}`);
+    const adapter = new GroqReasoningAdapter({ client: { create } as never });
+    const service = createReconciliationRunService(repository, adapter, undefined, () => `run-groq-${_name.replace(" ", "-")}`);
     const app = buildApp(config, createTestDatabase(), service);
     const response = await app.inject({ method: "POST", url: "/api/runs", payload: {
       asOfDate: "2026-08-23",
@@ -340,7 +337,7 @@ describe("reconciliation routes", () => {
       expect(response.statusCode).toBe(202);
       await vi.waitFor(() => expect(repository.markRunFailed).toHaveBeenCalledOnce());
       expect(repository.saveCompletedRun).not.toHaveBeenCalled();
-      expect(repository.markRunFailed).toHaveBeenCalledWith("run-openai-provider-rejection", "AI_REQUEST_ERROR", expect.any(Array));
+      expect(repository.markRunFailed).toHaveBeenCalledWith("run-groq-provider-rejection", "AI_REQUEST_ERROR", expect.any(Array));
     }
     await app.close();
   });

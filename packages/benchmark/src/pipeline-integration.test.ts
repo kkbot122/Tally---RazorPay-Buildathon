@@ -160,9 +160,30 @@ describe("T023 end-to-end reconciliation pipeline", () => {
     )).length;
     expect(falseReconciliations).toBe(0);
 
-    expect(adapter.calls).toHaveLength(9);
+    const agentStarts = result.trace.filter((event) => event.type === "AGENT_STARTED");
+    expect(adapter.calls).toHaveLength(6);
+    expect(agentStarts).toHaveLength(adapter.calls.length);
+    expect(agentStarts.every((event) => (event.payload as { candidateCount?: number }).candidateCount! > 0)).toBe(true);
+    expect(new Set(adapter.calls).size).toBe(adapter.calls.length);
+    expect(result.results.filter((item) => item.source === "DETERMINISTIC").every((item) =>
+      !result.trace.some((event) => event.caseId === item.caseId && event.type === "AGENT_STARTED"),
+    )).toBe(true);
     expect(result.trace[0]?.type).toBe("RUN_STARTED");
     expect(result.trace.at(-1)?.type).toBe("RUN_COMPLETED");
+    expect(result.trace.at(-1)?.payload).toMatchObject({ metrics: {
+      totalSourceRecords: 45,
+      logicalCases: 20,
+      deterministicallyResolved: 11,
+      deterministicExceptions: 3,
+      aiEscalations: 6,
+      aiEscalationRate: 0.3,
+      initialAiCalls: 6,
+      aiRepairCalls: 0,
+      aiProposalsAccepted: 6,
+      aiProposalsRejected: 0,
+      aiAbstentions: 2,
+      totalModelCalls: 6,
+    } });
     expect(result.trace.map((event) => event.sequenceNo)).toEqual(
       Array.from({ length: result.trace.length }, (_, index) => index + 1),
     );
@@ -468,7 +489,12 @@ describe("T023 end-to-end reconciliation pipeline", () => {
       runId: "run-multi-failure-001",
       asOfDate: "2026-08-23",
       bankCsv,
-      ledgerCsv: `${LEDGER_HEADERS.join(",")}\n`,
+      ledgerCsv: [
+        LEDGER_HEADERS.join(","),
+        "L1,2026-08-10,,100.00,INR,CREDIT,LEDGER-1,Ledger One,Receipt,ERP,",
+        "L2,2026-08-10,,100.00,INR,CREDIT,LEDGER-2,Ledger Two,Receipt,ERP,",
+        "L3,2026-08-10,,100.00,INR,CREDIT,LEDGER-3,Ledger Three,Receipt,ERP,",
+      ].join("\n"),
       modelAdapter: adapter,
       reasoningConcurrency: 3,
     })).rejects.toThrow("B1 failure");

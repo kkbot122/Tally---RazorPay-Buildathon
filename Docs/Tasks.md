@@ -212,8 +212,8 @@ Expected variables should include placeholders for:
 ```text
 PORT
 DATABASE_URL
-OPENAI_API_KEY
-OPENAI_MODEL
+GROQ_API_KEY
+GROQ_MODEL
 WEB_ORIGIN
 ```
 

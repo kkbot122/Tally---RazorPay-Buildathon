@@ -5,7 +5,7 @@ import { createRecordLookup, emptyUsedRecordState } from "../compatibility/index
 import type { CandidateSet } from "../candidates/index.js";
 import type { ParsedBankTransaction, ParsedLedgerTransaction } from "../parsing/types.js";
 import { verifyMatchProposal } from "../verifier/index.js";
-import { runReconciliation } from "./run-reconciliation.js";
+import { planReconciliation, processPlannedBatch, runReconciliation } from "./run-reconciliation.js";
 import { ReconciliationOperationalError } from "./types.js";
 import { ReasoningAdapterError, type ReasoningModelAdapter } from "../agent/index.js";
 
@@ -27,6 +27,7 @@ type LedgerRow = {
   reference?: string;
   counterparty?: string;
   accountingDate?: string;
+  maturityDate?: string;
 };
 
 const BANK_HEADERS = "bank_txn_id,booking_date,value_date,amount,currency,direction,reference,counterparty,description,batch_id";
@@ -36,7 +37,7 @@ function bankCsv(rows: BankRow[]): string {
 }
 
 function ledgerCsv(rows: LedgerRow[]): string {
-  return [LEDGER_HEADERS, ...rows.map((row) => [row.id, row.accountingDate ?? "2026-08-10", "", row.amount ?? "100.00", row.currency ?? "INR", "CREDIT", row.reference ?? "REF-1", row.counterparty ?? "Acme", "Receipt", "ERP", ""].join(","))].join("\n");
+  return [LEDGER_HEADERS, ...rows.map((row) => [row.id, row.accountingDate ?? "2026-08-10", row.maturityDate ?? "", row.amount ?? "100.00", row.currency ?? "INR", "CREDIT", row.reference ?? "REF-1", row.counterparty ?? "Acme", "Receipt", "ERP", ""].join(","))].join("\n");
 }
 
 function proposalFor(primaryId: string, ledgerIds: string[], overrides: Partial<AgentProposal> = {}): AgentProposal {
@@ -120,13 +121,160 @@ function matchProposal(bankRecordIds: string[], ledgerRecordIds: string[], evide
 }
 
 describe("T034 core engine safety invariants", () => {
+  it("finalizes a record with no viable candidate without calling the model", async () => {
+    let calls = 0;
+    const result = await runCase(
+      [{ id: "B1", reference: "BANK-ONLY", counterparty: "Bank Only" }],
+      [],
+      { generateProposal: async () => { calls += 1; return proposalFor("B1", []); } },
+    );
+
+    expect(calls).toBe(0);
+    expect(result.results).toContainEqual(expect.objectContaining({
+      caseId: "BANK:B1",
+      outcome: "UNRESOLVED",
+      reasonCode: "NO_CANDIDATE",
+      source: "DETERMINISTIC",
+    }));
+  });
+
+  it("does not plan AI work for a record with no viable candidate", () => {
+    const plan = planReconciliation({
+      runId: "run-no-candidate-plan",
+      asOfDate: "2026-08-23",
+      bankCsv: bankCsv([{ id: "B1", reference: "BANK-ONLY", counterparty: "Bank Only" }]),
+      ledgerCsv: ledgerCsv([]),
+      clock: () => new Date("2026-01-01T00:00:00.000Z"),
+    });
+
+    expect(plan.components).toEqual([]);
+    expect(plan.deterministicResults).toContainEqual(expect.objectContaining({
+      caseId: "BANK:B1",
+      outcome: "UNRESOLVED",
+      reasonCode: "NO_CANDIDATE",
+      source: "DETERMINISTIC",
+    }));
+  });
+
+  it("finalizes a future-maturity ledger exception without calling the model", async () => {
+    let calls = 0;
+    const result = await runCase(
+      [],
+      [{ id: "L1", maturityDate: "2026-08-24", reference: "LEDGER-ONLY" }],
+      { generateProposal: async () => { calls += 1; return proposalFor("B1", []); } },
+    );
+
+    expect(calls).toBe(0);
+    expect(result.results).toContainEqual(expect.objectContaining({
+      caseId: "LEDGER:L1",
+      outcome: "EXPLAINED_OUTSTANDING",
+      reasonCode: "TIMING_DIFFERENCE",
+      source: "DETERMINISTIC",
+    }));
+  });
+
+  it("does not plan AI work for a future-maturity ledger exception", () => {
+    const plan = planReconciliation({
+      runId: "run-timing-plan",
+      asOfDate: "2026-08-23",
+      bankCsv: bankCsv([]),
+      ledgerCsv: ledgerCsv([{ id: "L1", maturityDate: "2026-08-24", reference: "LEDGER-ONLY" }]),
+    });
+
+    expect(plan.components).toEqual([]);
+    expect(plan.deterministicResults).toContainEqual(expect.objectContaining({
+      caseId: "LEDGER:L1",
+      outcome: "EXPLAINED_OUTSTANDING",
+      reasonCode: "TIMING_DIFFERENCE",
+      source: "DETERMINISTIC",
+    }));
+  });
+
+  it("plans one investigation for a reciprocal candidate relationship", () => {
+    const plan = planReconciliation({
+      runId: "run-reciprocal-plan",
+      asOfDate: "2026-08-23",
+      bankCsv: bankCsv([{ id: "B1", amount: "100.00", reference: "SHARED" }]),
+      ledgerCsv: ledgerCsv([{ id: "L1", amount: "99.99", reference: "SHARED" }]),
+      clock: () => new Date("2026-01-01T00:00:00.000Z"),
+    });
+
+    expect(plan.components).toHaveLength(1);
+    expect(plan.components[0]).toMatchObject({ caseId: "BANK:B1" });
+  });
+
+  it("plans one investigation for an ambiguous connected relationship", () => {
+    const plan = planReconciliation({
+      runId: "run-connected-plan",
+      asOfDate: "2026-08-23",
+      bankCsv: bankCsv([
+        { id: "B1", amount: "90.00", reference: "SHARED" },
+        { id: "B2", amount: "110.00", reference: "SHARED" },
+      ]),
+      ledgerCsv: ledgerCsv([{ id: "L1", amount: "100.00", reference: "SHARED" }]),
+    });
+
+    expect(plan.components).toHaveLength(1);
+    expect([plan.components[0]!.primary.recordId, ...plan.components[0]!.candidateSet.candidates.map((candidate) => candidate.recordId)].sort()).toEqual(["B1", "B2", "L1"]);
+  });
+
+  it("keeps every record in a connected investigation visible when the model abstains", async () => {
+    const plan = planReconciliation({
+      runId: "run-connected-abstention",
+      asOfDate: "2026-08-23",
+      bankCsv: bankCsv([
+        { id: "B1", amount: "90.00", reference: "SHARED" },
+        { id: "B2", amount: "110.00", reference: "SHARED" },
+      ]),
+      ledgerCsv: ledgerCsv([{ id: "L1", amount: "100.00", reference: "SHARED" }]),
+    });
+    const modelAdapter: ReasoningModelAdapter = {
+      generateProposal: async ({ input }) => ({ ...proposalFor(primaryId(input), []), proposedOutcome: "INSUFFICIENT_EVIDENCE", confidence: "LOW" }),
+    };
+
+    const processed = await processPlannedBatch({ runId: plan.runId, asOfDate: plan.asOfDate, components: plan.components, modelAdapter });
+
+    expect(processed.results).toHaveLength(1);
+    expect(processed.results[0]).toMatchObject({ outcome: "UNRESOLVED", bankRecordIds: ["B1", "B2"], ledgerRecordIds: ["L1"] });
+  });
+
+  it("isolates planned investigations into one provider request each", async () => {
+    const plan = planReconciliation({
+      runId: "run-single-request-components",
+      asOfDate: "2026-08-23",
+      bankCsv: bankCsv([
+        { id: "B1", amount: "100.00", reference: "BANK-1", counterparty: "Bank One" },
+        { id: "B2", amount: "200.00", reference: "BANK-2", counterparty: "Bank Two" },
+      ]),
+      ledgerCsv: ledgerCsv([
+        { id: "L1", amount: "100.00", reference: "LEDGER-1", counterparty: "Ledger One" },
+        { id: "L2", amount: "200.00", reference: "LEDGER-2", counterparty: "Ledger Two" },
+      ]),
+    });
+    let individualCalls = 0;
+    let batchCalls = 0;
+    const modelAdapter: ReasoningModelAdapter & { generateBatchProposal: () => Promise<unknown[]> } = {
+      generateProposal: async ({ input }) => {
+        individualCalls += 1;
+        const id = primaryId(input);
+        return { ...proposalFor(id, []), proposedOutcome: "INSUFFICIENT_EVIDENCE" as const, confidence: "LOW" as const };
+      },
+      generateBatchProposal: async () => { batchCalls += 1; return []; },
+    };
+
+    await processPlannedBatch({ runId: plan.runId, asOfDate: plan.asOfDate, components: plan.components, modelAdapter });
+
+    expect(batchCalls).toBe(0);
+    expect(individualCalls).toBe(plan.components.length);
+  });
+
   it("rejects reconciliation when currencies differ", async () => {
     const result = await runCase(
       [{ id: "B1", currency: "INR" }],
       [{ id: "L1", currency: "USD" }],
       adapter((id) => proposalFor(id, ["L1"])),
     );
-    expect(result.results.find((item) => item.caseId === "BANK:B1")).toMatchObject({ outcome: "UNRESOLVED", reasonCode: "VERIFICATION_FAILED" });
+    expect(result.results.find((item) => item.caseId === "BANK:B1")).toMatchObject({ outcome: "UNRESOLVED", reasonCode: "NO_CANDIDATE", source: "DETERMINISTIC" });
   });
 
   it("never auto-reconciles when amounts differ", async () => {
@@ -183,6 +331,31 @@ describe("T034 core engine safety invariants", () => {
     });
   });
 
+  it("does not explain future maturity when a bank record carries conflicting reference evidence", () => {
+    const plan = planReconciliation({
+      runId: "future-maturity-conflict",
+      asOfDate: "2026-08-20",
+      bankCsv: bankCsv([{ id: "B1", amount: "90.00", reference: "SHARED-REF" }]),
+      ledgerCsv: ledgerCsv([{ id: "L1", amount: "100.00", maturityDate: "2026-08-24", reference: "SHARED-REF" }]),
+    });
+
+    expect(plan.deterministicResults).toHaveLength(0);
+    expect(plan.components).toHaveLength(1);
+    expect([plan.components[0]?.primary.recordId, ...plan.components[0]!.candidateSet.candidates.map((candidate) => candidate.recordId)].sort()).toEqual(["B1", "L1"]);
+  });
+
+  it("does not explain future maturity when contextual bank evidence is viable", () => {
+    const plan = planReconciliation({
+      runId: "future-maturity-context-conflict",
+      asOfDate: "2026-08-20",
+      bankCsv: bankCsv([{ id: "B1", amount: "90.00", reference: "BANK-REF", counterparty: "Acme" }]),
+      ledgerCsv: ledgerCsv([{ id: "L1", amount: "100.00", maturityDate: "2026-08-24", reference: "LEDGER-REF", counterparty: "Acme" }]),
+    });
+
+    expect(plan.deterministicResults.some((result) => result.reasonCode === "TIMING_DIFFERENCE")).toBe(false);
+    expect(plan.components).toHaveLength(1);
+  });
+
   it("prevents record reuse after an accepted reconciliation", async () => {
     const result = await runCase([{ id: "B1" }, { id: "B2" }], [{ id: "L1" }], adapter((id) => proposalFor(id, ["L1"])));
     expect(result.results.filter((item) => item.outcome === "RECONCILED")).toHaveLength(1);
@@ -229,7 +402,7 @@ describe("T034 core engine safety invariants", () => {
     expect(result.results.find((item) => item.caseId === "BANK:B1")).toMatchObject({ outcome: "RECONCILED", ledgerRecordIds: ["L-RIGHT"] });
   });
 
-  it("does not spend a second model call on an already attempted one-to-one reciprocal pair", async () => {
+  it("represents a reciprocal pair as one investigation and one result", async () => {
     let calls = 0;
     const result = await runCase(
       [{ id: "B1", amount: "100.00", reference: "REF-1" }],
@@ -243,7 +416,8 @@ describe("T034 core engine safety invariants", () => {
     );
 
     expect(calls).toBe(1);
-    expect(result.results).toHaveLength(2);
+    expect(result.results).toHaveLength(1);
+    expect(result.results[0]).toMatchObject({ outcome: "UNRESOLVED", bankRecordIds: ["B1"], ledgerRecordIds: ["L1"] });
   });
 
   it("keeps an exact-amount alternative and omits a dominated amount mismatch from model context", async () => {

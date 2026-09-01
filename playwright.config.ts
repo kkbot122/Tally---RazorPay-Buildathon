@@ -2,7 +2,7 @@ import { defineConfig, devices } from "@playwright/test";
 
 const databaseUrl = process.env.TALLY_E2E_DATABASE_URL ?? "postgresql://tally:tally@127.0.0.1:55432/tally_e2e";
 const deterministicAdapter = process.env.TALLY_E2E_DETERMINISTIC_ADAPTER !== "false" && process.env.TALLY_E2E_DETERMINISTIC_ADAPTER !== "0";
-const openAiApiKey = process.env.TALLY_E2E_OPENAI_API_KEY ?? "";
+const groqApiKey = process.env.TALLY_E2E_GROQ_API_KEY ?? "";
 const e2eApiPort = process.env.TALLY_E2E_API_PORT ?? "3101";
 const e2eWebPort = process.env.TALLY_E2E_WEB_PORT ?? "3100";
 const e2eApiOrigin = `http://127.0.0.1:${e2eApiPort}`;
@@ -34,8 +34,8 @@ export default defineConfig({
         NODE_ENV: "test",
         PORT: e2eApiPort,
         DATABASE_URL: databaseUrl,
-        OPENAI_API_KEY: openAiApiKey,
-        OPENAI_MODEL: process.env.TALLY_E2E_OPENAI_MODEL ?? "gpt-5.6-terra",
+        GROQ_API_KEY: groqApiKey,
+        GROQ_MODEL: process.env.TALLY_E2E_GROQ_MODEL ?? "openai/gpt-oss-120b",
         WEB_ORIGIN: e2eWebOrigin,
         TALLY_E2E_DETERMINISTIC_ADAPTER: deterministicAdapter ? "true" : "false",
       },

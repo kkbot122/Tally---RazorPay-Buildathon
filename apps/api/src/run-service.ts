@@ -4,7 +4,6 @@ import {
   parseLedgerCsv,
   runReconciliation,
   planReconciliation,
-  processPlannedComponent,
   processPlannedBatch,
   ReasoningAdapterError,
   ReconciliationOperationalError,
@@ -81,6 +80,19 @@ export type RunSummary = {
   failedWorkItems?: number;
   pendingWorkItems?: number;
   activeWorkItems?: number;
+  totalSourceRecords?: number;
+  logicalCases?: number;
+  deterministicallyResolved?: number;
+  deterministicExceptions?: number;
+  aiEscalations?: number;
+  aiEscalationRate?: number;
+  initialAiCalls?: number;
+  aiRepairCalls?: number;
+  aiProposalsAccepted?: number;
+  aiProposalsRejected?: number;
+  aiAbstentions?: number;
+  totalModelCalls?: number;
+  durationMs?: number;
 };
 
 export function createReconciliationRunService(
@@ -102,6 +114,36 @@ export function createReconciliationRunService(
   const workerOwner = `api_${randomUUID()}`;
   let durableWorker: ReturnType<typeof createReconciliationJobWorker> | undefined;
 
+  async function finalizeDurableRun(runId: string): Promise<void> {
+    if (!await repository.finalizeRun?.(runId) || repository.appendOperationalTrace === undefined) return;
+    const run = await repository.getRunById(runId);
+    if (run === undefined) return;
+    const results = await repository.getResultsForRun(runId);
+    const trace = await repository.getTraceForRun(runId);
+    await repository.appendOperationalTrace({
+      runId,
+      type: "RUN_COMPLETED",
+      message: "Reconciliation run completed.",
+      metadata: { casesProcessed: results.length, metrics: deriveWorkloadMetrics(run, results, trace) },
+    });
+  }
+
+  async function planDurableRun(runId: string, input: CreateRunRequest): Promise<void> {
+    try {
+      await repository.persistPlan!({ ...planReconciliation({ ...input, runId }) }, { maxItemsPerBatch: workerConfiguration.maxReasoningItemsPerRequest });
+      await finalizeDurableRun(runId);
+    } catch (error) {
+      const code = failureCode(error);
+      const trace = fallbackFailureTrace(runId, code);
+      onRunFailure?.({ runId, failureCode: code, traceEventCount: trace.length });
+      try {
+        await repository.markRunFailed(runId, code, trace);
+      } catch {
+        onRunFailure?.({ runId, failureCode: code, traceEventCount: trace.length, failurePersistenceFailed: true });
+      }
+    }
+  }
+
   function ensureWorker(): void {
     if (!durableJobs || durableWorker !== undefined || repository.getRunInput === undefined || repository.persistPlan === undefined || repository.persistResultCheckpoint === undefined || repository.finalizeRun === undefined) return;
     durableWorker = createReconciliationJobWorker({
@@ -114,14 +156,24 @@ export function createReconciliationRunService(
       onEvent: (event) => {
         if (event.runId === undefined || repository.appendOperationalTrace === undefined) return;
         const type = ({ claimed: "WORK_ITEM_CLAIMED", completed: "WORK_ITEM_COMPLETED", failed: "WORK_ITEM_FAILED", released: "WORK_ITEM_RELEASED", slice_yielded: "WORKER_SLICE_YIELDED" } as const)[event.type];
-        void repository.appendOperationalTrace({ runId: event.runId, type, message: `Reconciliation work item ${event.type}.`, metadata: { workItemId: event.workItemId, durationMs: event.durationMs, classification: event.classification } });
-        if (event.type === "completed") void repository.finalizeRun?.(event.runId);
-        if (event.type === "failed") {
-          // A failed work item has no verified terminal result. Mark the run
-          // failed rather than allowing a later finalization to misrepresent
-          // partial checkpoint data as a completed reconciliation.
-          void repository.markRunFailed(event.runId, event.classification ?? "WORK_ITEM_FAILED");
-        }
+        void (async () => {
+          await repository.appendOperationalTrace!({ runId: event.runId!, type, message: `Reconciliation work item ${event.type}.`, metadata: { workItemId: event.workItemId, durationMs: event.durationMs, classification: event.classification } });
+          if (event.type === "completed") await finalizeDurableRun(event.runId!);
+          if (event.type === "failed") {
+            // A failed work item has no verified terminal result. Mark the run
+            // failed rather than allowing a later finalization to misrepresent
+            // partial checkpoint data as a completed reconciliation.
+            await repository.markRunFailed(event.runId!, event.classification ?? "WORK_ITEM_FAILED");
+          }
+        })().catch(async (error: unknown) => {
+          const code = failureCode(error);
+          onRunFailure?.({ runId: event.runId!, failureCode: code, traceEventCount: 0 });
+          try {
+            await repository.markRunFailed(event.runId!, code);
+          } catch {
+            onRunFailure?.({ runId: event.runId!, failureCode: code, traceEventCount: 0, failurePersistenceFailed: true });
+          }
+        });
       },
       processWorkItem: async (workItem, signal, controls) => {
         const input = await repository.getRunInput!(workItem.runId);
@@ -220,10 +272,7 @@ export function createReconciliationRunService(
       const controller = new AbortController();
       if (!durableJobs) controllers.set(runId, controller);
       if (durableJobs && repository.persistPlan !== undefined) {
-        schedule(async () => {
-          await repository.persistPlan!({ ...planReconciliation({ ...validatedRequest, runId }) }, { maxItemsPerBatch: workerConfiguration.maxReasoningItemsPerRequest });
-          await repository.finalizeRun?.(runId);
-        });
+        schedule(() => planDurableRun(runId, validatedRequest));
         ensureWorker();
       } else {
         schedule(() => executeRun(runId, validatedRequest, controller));
@@ -252,10 +301,7 @@ export function createReconciliationRunService(
       for (const runId of await repository.getRecoverableRunIds()) {
         const input = await repository.getRunInput(runId);
         if (input === undefined) continue;
-        schedule(async () => {
-          await repository.persistPlan!({ ...planReconciliation({ ...input, runId }) }, { maxItemsPerBatch: workerConfiguration.maxReasoningItemsPerRequest });
-          await repository.finalizeRun?.(runId);
-        });
+        schedule(() => planDurableRun(runId, input));
       }
     },
     async startWorker() { ensureWorker(); },
@@ -278,6 +324,8 @@ export function createReconciliationRunService(
         activeWorkItems: run.activeWorkItems,
       };
       const results = await repository.getResultsForRun(runId);
+      const trace = await repository.getTraceForRun(runId);
+      const metrics = deriveWorkloadMetrics(run, results, trace);
       return {
         runId,
         status: run.status,
@@ -291,6 +339,7 @@ export function createReconciliationRunService(
         failedWorkItems: run.failedWorkItems,
         pendingWorkItems: run.pendingWorkItems,
         activeWorkItems: run.activeWorkItems,
+        ...metrics,
       };
     },
     async getResults(runId) {
@@ -318,6 +367,39 @@ export function createReconciliationRunService(
       if (trace.length === 0) throw new TraceUnavailableError();
       return trace;
     },
+  };
+}
+
+function metric(metrics: Record<string, unknown> | undefined, key: string, fallback: number): number {
+  const value = metrics?.[key];
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : fallback;
+}
+
+function deriveWorkloadMetrics(
+  run: { totalBankRecords: number; totalLedgerRecords: number; startedAt: Date | null; completedAt: Date | null },
+  results: ReadonlyArray<{ source: string; finalOutcome: string }>,
+  trace: readonly PersistedTraceEvent[],
+) {
+  const recordedMetrics = [...trace].reverse().find((event) => event.type === "RUN_COMPLETED")?.payload.metrics as Record<string, unknown> | undefined;
+  const initialAiCalls = trace.filter((event) => event.type === "AGENT_STARTED").length;
+  const aiRepairCalls = trace.filter((event) => event.type === "REPAIR_STARTED").length;
+  const aiEscalations = metric(recordedMetrics, "aiEscalations", initialAiCalls);
+  const logicalCases = metric(recordedMetrics, "logicalCases", results.length);
+  const verificationEvents = trace.filter((event) => event.type === "VERIFICATION_CHECKED");
+  return {
+    totalSourceRecords: metric(recordedMetrics, "totalSourceRecords", run.totalBankRecords + run.totalLedgerRecords),
+    logicalCases,
+    deterministicallyResolved: metric(recordedMetrics, "deterministicallyResolved", results.filter((result) => result.source === "DETERMINISTIC" && result.finalOutcome === "RECONCILED").length),
+    deterministicExceptions: metric(recordedMetrics, "deterministicExceptions", results.filter((result) => result.source === "DETERMINISTIC" && result.finalOutcome !== "RECONCILED").length),
+    aiEscalations,
+    aiEscalationRate: metric(recordedMetrics, "aiEscalationRate", logicalCases === 0 ? 0 : aiEscalations / logicalCases),
+    initialAiCalls: metric(recordedMetrics, "initialAiCalls", initialAiCalls),
+    aiRepairCalls: metric(recordedMetrics, "aiRepairCalls", aiRepairCalls),
+    aiProposalsAccepted: metric(recordedMetrics, "aiProposalsAccepted", verificationEvents.filter((event) => (event.payload.result as { status?: unknown } | undefined)?.status === "VERIFIED").length),
+    aiProposalsRejected: metric(recordedMetrics, "aiProposalsRejected", verificationEvents.filter((event) => (event.payload.result as { status?: unknown } | undefined)?.status === "REJECTED").length),
+    aiAbstentions: metric(recordedMetrics, "aiAbstentions", results.filter((result) => result.source === "AGENT_VERIFIED" && result.finalOutcome === "UNRESOLVED").length),
+    totalModelCalls: metric(recordedMetrics, "totalModelCalls", initialAiCalls + aiRepairCalls),
+    durationMs: metric(recordedMetrics, "durationMs", run.startedAt === null || run.completedAt === null ? 0 : Math.max(0, run.completedAt.getTime() - run.startedAt.getTime())),
   };
 }
 

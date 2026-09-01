@@ -13,14 +13,12 @@ export type ReasoningModelInput = {
 
 export interface ReasoningModelAdapter {
   generateProposal(input: ReasoningModelInput): Promise<AgentProposal>;
-  /** Optional single-request path for independent components. */
-  generateBatchProposal?(input: { items: readonly (ReasoningModelInput & { componentId: string })[]; signal?: AbortSignal; onProviderRequestStart?: () => void }): Promise<unknown>;
 }
 
 export type ReasoningAdapterErrorCode = "AI_REQUEST_ERROR" | "AI_SCHEMA_ERROR";
 
 export type ReasoningAdapterDiagnostics = {
-  provider?: "openai" | "nvidia" | "groq";
+  provider?: "groq";
   model?: string;
   category?: "TIMEOUT" | "RATE_LIMIT" | "CALL_BUDGET" | "AUTHENTICATION" | "VALIDATION" | "SERVER" | "UNKNOWN";
   /** The provider quota which rejected this request, when its headers identify one. */

@@ -53,6 +53,7 @@ export type TraceEventPayload = {
     primarySide: CandidatePrimary["side"];
     primaryRecordId: string;
     candidateRecordIds: string[];
+    candidates?: Array<{ side: CandidatePrimary["side"]; recordId: string; selectionTier: string; signals: string[]; facts: Record<string, unknown> }>;
     totalEligibleCandidates: number;
     truncated: boolean;
   };
@@ -60,6 +61,7 @@ export type TraceEventPayload = {
     primarySide: CandidatePrimary["side"];
     primaryRecordId: string;
     candidateCount: number;
+    escalationReason?: DeterministicReason;
     model?: string;
   };
   AGENT_PROPOSED: AgentProposal;
@@ -75,20 +77,47 @@ export type TraceEventPayload = {
     bankRecordIds: string[];
     ledgerRecordIds: string[];
     reasonCode: ReasonCode;
+    source?: "DETERMINISTIC" | "AGENT_VERIFIED";
+    reason?: string;
+    aiEscalated?: boolean;
   };
   RUN_COMPLETED: {
     casesProcessed?: number;
+    metrics?: {
+      totalSourceRecords: number;
+      logicalCases: number;
+      deterministicallyResolved: number;
+      deterministicExceptions: number;
+      aiEscalations: number;
+      aiEscalationRate: number;
+      initialAiCalls: number;
+      aiRepairCalls: number;
+      aiProposalsAccepted: number;
+      aiProposalsRejected: number;
+      aiAbstentions: number;
+      totalModelCalls: number;
+      durationMs: number;
+    };
     reasoning?: {
       callsStarted: number;
       repairCallsStarted: number;
       callBudgetSkips: number;
-      reciprocalSkips: number;
       candidatesPruned: number;
       verificationRejections: number;
       verificationFailures: Record<string, number>;
     };
   };
-  RUN_PLANNED: { totalWorkItems?: number; deterministicResults?: number; reasoningComponents?: number };
+  RUN_PLANNED: {
+    totalWorkItems?: number;
+    deterministicResults?: number;
+    reasoningComponents?: number;
+    totalSourceRecords?: number;
+    logicalCases?: number;
+    deterministicallyResolved?: number;
+    deterministicExceptions?: number;
+    aiEscalations?: number;
+    aiEscalationRate?: number;
+  };
   WORK_ITEM_CREATED: { workItemId?: string; sequenceNo?: number; caseIds?: string[]; batchSize?: number };
   WORK_ITEM_CLAIMED: { workItemId?: string; owner?: string; attemptCount?: number; leaseExpiresAt?: string };
   WORK_ITEM_RELEASED: { workItemId?: string; reason?: string };

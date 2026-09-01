@@ -1,6 +1,6 @@
 import { loadFrozenGroundTruth, loadFrozenPrimaryCaseAlignment } from "@tally/benchmark";
 import Fastify from "fastify";
-import { CsvValidationError, DEFAULT_REASONING_CONCURRENCY, GroqRateLimiter, OpenAICompatibleChatCompletionsAdapter, OpenAIResponsesAdapter } from "@tally/reconciliation";
+import { CsvValidationError, DEFAULT_REASONING_CONCURRENCY, GroqRateLimiter, GroqReasoningAdapter } from "@tally/reconciliation";
 import { ZodError } from "zod";
 import type { AppConfig } from "./config/env.js";
 import { loadConfig, useE2EDeterministicAdapter, workerConfiguration } from "./config/env.js";
@@ -70,24 +70,17 @@ export function buildApp(
     createReconciliationRunRepository(database.db),
     useE2EDeterministicAdapter(config)
       ? createE2EReasoningAdapter()
-      : config.AI_PROVIDER === "openai"
-        ? new OpenAIResponsesAdapter({ apiKey: config.OPENAI_API_KEY, model: config.OPENAI_MODEL, baseURL: config.AI_BASE_URL, timeout: config.AI_REQUEST_TIMEOUT_MS, maxRetries: config.AI_MAX_RETRIES, maxCompletionTokens: durableConfiguration.completionTokenCap })
-        : new OpenAICompatibleChatCompletionsAdapter({
-            provider: config.AI_PROVIDER,
-            apiKey: config.AI_PROVIDER === "groq" ? config.GROQ_API_KEY : config.OPENAI_API_KEY,
-            model: config.OPENAI_MODEL,
-            baseURL: config.AI_BASE_URL,
-            reasoningEffort: config.AI_REASONING_EFFORT,
-            timeout: config.AI_REQUEST_TIMEOUT_MS,
-            maxRetries: config.AI_MAX_RETRIES,
-            maxCompletionTokens: durableConfiguration.completionTokenCap,
-            groqRateLimiter: config.AI_PROVIDER === "groq" && database.sql !== undefined
-              ? new GroqRateLimiter(new PostgresGroqQuotaStateStore(database.sql), {
-                  requestsPerMinute: config.AI_GROQ_REQUESTS_PER_MINUTE,
-                  tokensPerMinute: config.AI_GROQ_TOKENS_PER_MINUTE,
-                }, config.AI_GROQ_QUOTA_SCOPE)
-              : undefined,
-          }),
+      : new GroqReasoningAdapter({
+          apiKey: config.GROQ_API_KEY,
+          model: config.GROQ_MODEL,
+          timeout: config.AI_REQUEST_TIMEOUT_MS,
+          maxRetries: config.AI_MAX_RETRIES,
+          maxCompletionTokens: durableConfiguration.completionTokenCap,
+          groqRateLimiter: database.sql === undefined ? undefined : new GroqRateLimiter(new PostgresGroqQuotaStateStore(database.sql), {
+            requestsPerMinute: config.AI_GROQ_REQUESTS_PER_MINUTE,
+            tokensPerMinute: config.AI_GROQ_TOKENS_PER_MINUTE,
+          }, config.AI_GROQ_QUOTA_SCOPE),
+        }),
     undefined,
     undefined,
     (event) => app.log.warn(event, "model proposal rejected by verifier"),
@@ -95,7 +88,7 @@ export function buildApp(
     config.AI_REASONING_CONCURRENCY ?? DEFAULT_REASONING_CONCURRENCY,
     (event) => app.log.error(event, event.failurePersistenceFailed ? "run failure persistence failed" : "reconciliation run failed"),
     (event) => app.log.warn(event, "model request failed"),
-    config.AI_WORKER_SLICE_MS ?? 30_000,
+    config.AI_RUN_DEADLINE_MS,
     config.AI_MAX_REASONING_CALLS_PER_RUN,
     durableConfiguration,
   ));

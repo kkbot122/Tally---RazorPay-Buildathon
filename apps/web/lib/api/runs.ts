@@ -16,6 +16,19 @@ export type RunSummary = {
   failedWorkItems?: number;
   pendingWorkItems?: number;
   activeWorkItems?: number;
+  totalSourceRecords?: number;
+  logicalCases?: number;
+  deterministicallyResolved?: number;
+  deterministicExceptions?: number;
+  aiEscalations?: number;
+  aiEscalationRate?: number;
+  initialAiCalls?: number;
+  aiRepairCalls?: number;
+  aiProposalsAccepted?: number;
+  aiProposalsRejected?: number;
+  aiAbstentions?: number;
+  totalModelCalls?: number;
+  durationMs?: number;
 };
 export type RunResult = {
   resultId?: string;

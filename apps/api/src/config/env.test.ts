@@ -8,11 +8,8 @@ describe("API environment configuration", () => {
       NODE_ENV: "development",
       PORT: 3001,
       DATABASE_URL: "postgresql://localhost:5432/tally",
-      OPENAI_API_KEY: "",
       GROQ_API_KEY: "",
-      OPENAI_MODEL: "gpt-5.6-terra",
-      AI_PROVIDER: "openai",
-      AI_REASONING_EFFORT: "none",
+      GROQ_MODEL: "openai/gpt-oss-120b",
       AI_REQUEST_TIMEOUT_MS: 12000,
       AI_MAX_RETRIES: 0,
       AI_REASONING_CONCURRENCY: 2,
@@ -30,33 +27,26 @@ describe("API environment configuration", () => {
       loadConfig({
         PORT: "4000",
         DATABASE_URL: "postgresql://db.example/tally",
-        OPENAI_API_KEY: "test-key",
-        OPENAI_MODEL: "test-model",
+        GROQ_API_KEY: "test-key",
+        GROQ_MODEL: "test-model",
         WEB_ORIGIN: "https://web.example",
       }),
-    ).toMatchObject({ PORT: 4000, OPENAI_MODEL: "test-model", AI_PROVIDER: "openai", AI_REASONING_EFFORT: "none", AI_REASONING_CONCURRENCY: 2, AI_MAX_REASONING_CALLS_PER_RUN: 3, AI_GROQ_TOKENS_PER_MINUTE: 8000, AI_RUN_DEADLINE_MS: 90000 });
+    ).toMatchObject({ PORT: 4000, GROQ_MODEL: "test-model", AI_REASONING_CONCURRENCY: 2, AI_MAX_REASONING_CALLS_PER_RUN: 3, AI_GROQ_TOKENS_PER_MINUTE: 8000, AI_RUN_DEADLINE_MS: 90000 });
 
     expect(() => EnvSchema.parse({ PORT: "70000" })).toThrow();
     expect(() => EnvSchema.parse({ WEB_ORIGIN: "not-a-url" })).toThrow();
-    expect(loadConfig({ AI_BASE_URL: "" }).AI_BASE_URL).toBeUndefined();
-    expect(loadConfig({ AI_PROVIDER: "groq", AI_BASE_URL: "https://groq.example/v1" }).AI_BASE_URL).toBe("https://groq.example/v1");
-  });
-
-  it("selects a valid NVIDIA model when the OpenAI default is left unchanged", () => {
-    expect(loadConfig({ AI_PROVIDER: "nvidia" }).OPENAI_MODEL).toBe("nvidia/nemotron-3.5-lightning-30b-a3b");
-    expect(loadConfig({ AI_PROVIDER: "nvidia", OPENAI_MODEL: "nvidia/custom-model" }).OPENAI_MODEL).toBe("nvidia/custom-model");
   });
 
   it("selects the Groq default model and validates its production key", () => {
-    expect(loadConfig({ AI_PROVIDER: "groq" }).OPENAI_MODEL).toBe("openai/gpt-oss-120b");
-    expect(() => loadConfig({ NODE_ENV: "production", AI_PROVIDER: "groq", DATABASE_URL: "postgresql://db.example/tally", WEB_ORIGIN: "https://web.example" })).toThrow(/GROQ_API_KEY/);
-    expect(loadConfig({ NODE_ENV: "production", AI_PROVIDER: "groq", GROQ_API_KEY: "groq-key", DATABASE_URL: "postgresql://db.example/tally", WEB_ORIGIN: "https://web.example" }).OPENAI_MODEL).toBe("openai/gpt-oss-120b");
+    expect(loadConfig({}).GROQ_MODEL).toBe("openai/gpt-oss-120b");
+    expect(() => loadConfig({ NODE_ENV: "production", DATABASE_URL: "postgresql://db.example/tally", WEB_ORIGIN: "https://web.example" })).toThrow(/GROQ_API_KEY/);
+    expect(loadConfig({ NODE_ENV: "production", GROQ_API_KEY: "groq-key", DATABASE_URL: "postgresql://db.example/tally", WEB_ORIGIN: "https://web.example" }).GROQ_MODEL).toBe("openai/gpt-oss-120b");
   });
 
   it("requires a usable reasoning key in production", () => {
-    expect(() => loadConfig({ NODE_ENV: "production" })).toThrow(/OPENAI_API_KEY/);
-    expect(() => loadConfig({ NODE_ENV: "production", OPENAI_API_KEY: "prod-key" })).toThrow(/DATABASE_URL/);
-    expect(loadConfig({ NODE_ENV: "production", OPENAI_API_KEY: "prod-key", DATABASE_URL: "postgresql://db.example/tally", WEB_ORIGIN: "https://web.example" }).NODE_ENV).toBe("production");
+    expect(() => loadConfig({ NODE_ENV: "production" })).toThrow(/GROQ_API_KEY/);
+    expect(() => loadConfig({ NODE_ENV: "production", GROQ_API_KEY: "prod-key" })).toThrow(/DATABASE_URL/);
+    expect(loadConfig({ NODE_ENV: "production", GROQ_API_KEY: "prod-key", DATABASE_URL: "postgresql://db.example/tally", WEB_ORIGIN: "https://web.example" }).NODE_ENV).toBe("production");
   });
 
   it("parses the E2E adapter flag exactly and only enables it in test", () => {
@@ -68,6 +58,6 @@ describe("API environment configuration", () => {
   });
 
   it("serializes free-tier Groq worker requests across a full quota minute", () => {
-    expect(workerConfiguration(loadConfig({ AI_PROVIDER: "groq", AI_WORKER_CONCURRENCY: "4", AI_WORKER_SLICE_MS: "60000" }))).toMatchObject({ concurrency: 1, sliceMs: 75_000 });
+    expect(workerConfiguration(loadConfig({ AI_WORKER_CONCURRENCY: "4", AI_WORKER_SLICE_MS: "60000" }))).toMatchObject({ concurrency: 1, sliceMs: 75_000, maxReasoningItemsPerRequest: 1 });
   });
 });

@@ -101,22 +101,18 @@ export type {
 export {
   AgentProposalSchema,
   buildReconciliationReasoningInput,
-  DEFAULT_REASONING_MODEL,
-  OpenAIResponsesAdapter,
-  DEFAULT_NVIDIA_REASONING_MODEL,
   DEFAULT_GROQ_REASONING_MODEL,
   DEFAULT_GROQ_QUOTA_SCOPE,
   DEFAULT_GROQ_RATE_LIMIT,
   GroqRateLimiter,
   InMemoryGroqQuotaStateStore,
-  OpenAICompatibleChatCompletionsAdapter,
+  GroqReasoningAdapter,
   RECONCILIATION_AGENT_INSTRUCTIONS,
   ReasoningAdapterError,
 } from "./src/agent/index.js";
 export { ReconciliationRunAbortedError } from "./src/pipeline/types.js";
 export type {
-  OpenAIResponsesAdapterOptions,
-  OpenAICompatibleChatCompletionsAdapterOptions,
+  GroqReasoningAdapterOptions,
   GroqQuotaDimension,
   GroqQuotaState,
   GroqQuotaStateStore,

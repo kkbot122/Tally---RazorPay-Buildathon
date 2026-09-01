@@ -49,7 +49,7 @@ describe("runtime run API client", () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       error: "SYSTEM_ERROR",
       message: "The service is temporarily unavailable.",
-      details: "OPENAI_API_KEY=sentinel",
+      details: "GROQ_API_KEY=sentinel",
     }), { status: 500 }));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -59,6 +59,6 @@ describe("runtime run API client", () => {
       status: 500,
       message: "The service is temporarily unavailable.",
     });
-    await expect(getRun("run-secret")).rejects.not.toThrow("OPENAI_API_KEY");
+    await expect(getRun("run-secret")).rejects.not.toThrow("GROQ_API_KEY");
   });
 });

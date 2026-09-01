@@ -30,21 +30,16 @@ Required Railway variables:
 
 - `NODE_ENV=production`
 - `DATABASE_URL=${{postgresql.DATABASE_URL}}`
-- `OPENAI_API_KEY=<Railway secret variable>`
-- `GROQ_API_KEY=<Railway secret variable when AI_PROVIDER=groq>`
-- `OPENAI_MODEL=gpt-5.6-terra` (or an approved configured model)
-- `AI_PROVIDER=openai` (use `nvidia` with an NVIDIA API key, or `groq` with a Groq API key)
-- `AI_BASE_URL` (optional; use `https://integrate.api.nvidia.com/v1` for NVIDIA or `https://api.groq.com/openai/v1` for Groq)
-- `AI_REASONING_EFFORT=none` for structured proposal output
+- `GROQ_API_KEY=<Railway secret variable>`
+- `GROQ_MODEL=openai/gpt-oss-120b` (or an approved Groq model)
 - `AI_REQUEST_TIMEOUT_MS=12000` to bound an individual provider request
 - `AI_MAX_RETRIES=0` to avoid multiplying the inference tail
 - `AI_REASONING_CONCURRENCY=2` as the initial bounded production setting
 - `AI_RUN_DEADLINE_MS=90000` as the maximum run-level inference budget
+- `AI_MAX_REASONING_ITEMS_PER_REQUEST=1` to isolate provider failures per investigation
 - `WEB_ORIGIN=https://<web-public-domain>`
 
-For NVIDIA’s hosted OpenAI-compatible API, set `AI_PROVIDER=nvidia`, `AI_BASE_URL=https://integrate.api.nvidia.com/v1`, `OPENAI_API_KEY=<NVIDIA API key>`, `OPENAI_MODEL=nvidia/nemotron-3.5-lightning-30b-a3b`, and `AI_REASONING_EFFORT=none`. The application uses NVIDIA’s `/v1/chat/completions` path, sends Nemotron’s documented `chat_template_kwargs.enable_thinking` option, and validates the returned proposal against the shared contract.
-
-For Groq, set `AI_PROVIDER=groq`, `GROQ_API_KEY=<Groq API key>`, `OPENAI_MODEL=llama-3.3-70b-versatile` (or another configured Groq model), and leave `AI_BASE_URL` empty unless overriding the default. Groq uses the shared OpenAI-compatible `/v1/chat/completions` adapter and validates the returned proposal against the shared contract.
+Groq is the only production reasoning provider. Every logical investigation uses its own structured request and remains subject to deterministic verification.
 
 The API listens on Railway’s `PORT` and binds to `0.0.0.0`. `/health` is liveness-only; `/health/db` is available for database diagnostics and is not the deployment healthcheck.
 

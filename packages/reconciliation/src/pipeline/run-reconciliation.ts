@@ -1,6 +1,6 @@
 import type { AgentProposal, FinalOutcome, ReasonCode } from "@tally/contracts";
 
-import { buildReconciliationReasoningInput, parseReasoningBatchResponse, ReasoningAdapterError, type ReasoningPrimary } from "../agent/index.js";
+import { buildReconciliationReasoningInput, ReasoningAdapterError, type ReasoningPrimary } from "../agent/index.js";
 import type { CandidatePrimary, CandidateSet } from "../candidates/index.js";
 import { generateCandidates } from "../candidates/index.js";
 import { createRecordLookup, emptyUsedRecordState, type RecordLookup, type UsedRecordState } from "../compatibility/index.js";
@@ -19,20 +19,28 @@ type PreparedReasoningItem = {
   caseId: string;
   candidateSet: CandidateSet;
   promptInput: Awaited<ReturnType<typeof buildReconciliationReasoningInput>>;
-  skipReciprocalAttempt: boolean;
+  coverComponentOnUnresolved?: boolean;
+  unresolvedBankRecordIds: string[];
+  unresolvedLedgerRecordIds: string[];
+};
+
+type SelectedReasoningDecision = {
+  decision: Extract<DeterministicDecision, { status: "NEEDS_REASONING" }>;
+  unresolvedBankRecordIds: string[];
+  unresolvedLedgerRecordIds: string[];
 };
 
 type ReasoningDiagnostics = {
   callsStarted: number;
   repairCallsStarted: number;
   callBudgetSkips: number;
-  reciprocalSkips: number;
   candidatesPruned: number;
   verificationRejections: number;
   verificationFailures: Record<string, number>;
 };
 
 export async function runReconciliation(input: RunReconciliationInput): Promise<ReconciliationRunResult> {
+  const executionStartedAt = Date.now();
   const reasoningConcurrency = validateReasoningConcurrency(input.reasoningConcurrency);
   const maxReasoningCalls = validateMaxReasoningCalls(input.maxReasoningCalls);
   let reasoningCalls = 0;
@@ -40,7 +48,6 @@ export async function runReconciliation(input: RunReconciliationInput): Promise<
     callsStarted: 0,
     repairCallsStarted: 0,
     callBudgetSkips: 0,
-    reciprocalSkips: 0,
     candidatesPruned: 0,
     verificationRejections: 0,
     verificationFailures: {},
@@ -129,6 +136,9 @@ export async function runReconciliation(input: RunReconciliationInput): Promise<
             bankRecordIds: event.bankRecordIds,
             ledgerRecordIds: event.ledgerRecordIds,
             reasonCode: event.reasonCode,
+            source: "DETERMINISTIC",
+            aiEscalated: false,
+            reason: `Resolved by deterministic rule ${event.rule}.`,
           },
         });
         results.push({
@@ -150,15 +160,28 @@ export async function runReconciliation(input: RunReconciliationInput): Promise<
     .filter((decision): decision is Extract<DeterministicDecision, { status: "NEEDS_REASONING" }> => decision.status === "NEEDS_REASONING")
     .sort(compareReasoningDecisions);
   const usedRecords = cloneUsedRecords(deterministic.usedRecords);
-  const attemptedSingletonPairs = new Set<string>();
-
-  for (let waveStart = 0; waveStart < reasoningDecisions.length; waveStart += reasoningConcurrency) {
+  const pendingReasoningDecisions: typeof reasoningDecisions = [];
+  for (const decision of reasoningDecisions) {
+    const primary = primaryForDecision(decision);
+    const result = mechanicalExceptionResult(records, primary, usedRecords, input.asOfDate, caseId(primary.side, primary.recordId), results.length + 1);
+    if (result === undefined) {
+      pendingReasoningDecisions.push(decision);
+      continue;
+    }
+    startCase(primary.side, primary.recordId);
+    trace.record({ type: "CASE_FINALIZED", caseId: result.caseId, payload: { ...result, aiEscalated: false } });
+    results.push(result);
+    consumeFinalResult(result, primary, usedRecords, finalizedPrimaries);
+  }
+  const selectedReasoningDecisions = selectConnectedReasoningDecisions(pendingReasoningDecisions, records, usedRecords);
+  for (let waveStart = 0; waveStart < selectedReasoningDecisions.length; waveStart += reasoningConcurrency) {
     throwIfAborted(input.signal);
-    const waveDecisions = reasoningDecisions.slice(waveStart, waveStart + reasoningConcurrency);
+    const waveDecisions = selectedReasoningDecisions.slice(waveStart, waveStart + reasoningConcurrency);
     const waveSnapshot = cloneUsedRecords(usedRecords);
     const preparedItems: PreparedReasoningItem[] = [];
 
-    for (const decision of waveDecisions) {
+    for (const selection of waveDecisions) {
+      const decision = selection.decision;
       const primary = primaryForDecision(decision);
       const primaryKeyValue = primaryKey(primary.side, primary.recordId);
       if (finalizedPrimaries.has(primaryKeyValue) || isUsed(primary, waveSnapshot)) continue;
@@ -172,9 +195,6 @@ export async function runReconciliation(input: RunReconciliationInput): Promise<
       });
       const { candidateSet, prunedCount } = pruneCandidatesForReasoning(generatedCandidateSet);
       reasoningDiagnostics.candidatesPruned += prunedCount;
-      const singletonPair = singletonPairKey(primary, candidateSet);
-      const skipReciprocalAttempt = singletonPair !== undefined && attemptedSingletonPairs.has(singletonPair);
-      if (singletonPair !== undefined && !skipReciprocalAttempt) attemptedSingletonPairs.add(singletonPair);
       trace.record({
         type: "CANDIDATES_GENERATED",
         caseId: currentCaseId,
@@ -182,10 +202,15 @@ export async function runReconciliation(input: RunReconciliationInput): Promise<
           primarySide: primary.side,
           primaryRecordId: primary.recordId,
           candidateRecordIds: candidateSet.candidates.map((candidate) => candidate.recordId),
+          candidates: traceCandidates(candidateSet),
           totalEligibleCandidates: candidateSet.totalEligibleCandidates,
           truncated: candidateSet.truncated,
         },
       });
+      if (!shouldEscalateToAI(candidateSet)) {
+        finalizeNoCandidate({ primary, caseId: currentCaseId }, results, finalizedPrimaries, trace);
+        continue;
+      }
       preparedItems.push({
         decision,
         primary,
@@ -197,17 +222,13 @@ export async function runReconciliation(input: RunReconciliationInput): Promise<
           records,
           runContext: { asOfDate: input.asOfDate },
         }),
-        skipReciprocalAttempt,
+        coverComponentOnUnresolved: true,
+        unresolvedBankRecordIds: selection.unresolvedBankRecordIds,
+        unresolvedLedgerRecordIds: selection.unresolvedLedgerRecordIds,
       });
     }
 
     const settlements = await Promise.allSettled(preparedItems.map(async (item) => {
-      if (item.skipReciprocalAttempt) {
-        reasoningDiagnostics.reciprocalSkips += 1;
-        const fallback = reciprocalAttemptProposal(item.primary);
-        trace.record({ type: "AGENT_PROPOSED", caseId: item.caseId, payload: fallback });
-        return fallback;
-      }
       trace.record({
         type: "AGENT_STARTED",
         caseId: item.caseId,
@@ -215,6 +236,7 @@ export async function runReconciliation(input: RunReconciliationInput): Promise<
           primarySide: item.primary.side,
           primaryRecordId: item.primary.recordId,
           candidateCount: item.candidateSet.candidates.length,
+          escalationReason: item.decision.reason,
         },
       });
       try {
@@ -247,8 +269,77 @@ export async function runReconciliation(input: RunReconciliationInput): Promise<
     }
   }
 
-  trace.record({ type: "RUN_COMPLETED", payload: { casesProcessed: results.length, reasoning: reasoningDiagnostics } });
+  const verificationEvents = trace.getEvents().filter((event) => event.type === "VERIFICATION_CHECKED");
+  const metrics = {
+    totalSourceRecords: records.bankRecords.size + records.ledgerRecords.size,
+    logicalCases: results.length,
+    deterministicallyResolved: results.filter((result) => result.source === "DETERMINISTIC" && result.outcome === "RECONCILED").length,
+    deterministicExceptions: results.filter((result) => result.source === "DETERMINISTIC" && result.outcome !== "RECONCILED").length,
+    aiEscalations: trace.getEvents().filter((event) => event.type === "AGENT_STARTED").length,
+    aiEscalationRate: results.length === 0 ? 0 : trace.getEvents().filter((event) => event.type === "AGENT_STARTED").length / results.length,
+    initialAiCalls: reasoningDiagnostics.callsStarted - reasoningDiagnostics.repairCallsStarted,
+    aiRepairCalls: reasoningDiagnostics.repairCallsStarted,
+    aiProposalsAccepted: verificationEvents.filter((event) => (event.payload as { result?: { status?: string } }).result?.status === "VERIFIED").length,
+    aiProposalsRejected: verificationEvents.filter((event) => (event.payload as { result?: { status?: string } }).result?.status === "REJECTED").length,
+    aiAbstentions: results.filter((result) => result.source === "AGENT_VERIFIED" && result.outcome === "UNRESOLVED").length,
+    totalModelCalls: reasoningDiagnostics.callsStarted,
+    durationMs: input.clock === undefined ? Date.now() - executionStartedAt : 0,
+  };
+  trace.record({ type: "RUN_COMPLETED", payload: { casesProcessed: results.length, reasoning: reasoningDiagnostics, metrics } });
   return { runId: input.runId, results, usedRecords, trace: trace.getEvents() };
+}
+
+export function shouldEscalateToAI(candidateSet: CandidateSet): boolean {
+  return candidateSet.candidates.length > 0;
+}
+
+function finalizeNoCandidate(
+  item: { primary: CandidatePrimary; caseId: string },
+  results: FinalReconciliationResult[],
+  finalizedPrimaries: Set<string>,
+  trace: TraceRecorder,
+): void {
+  const result = noCandidateResult(item.primary, item.caseId, results.length + 1);
+  trace.record({ type: "CASE_FINALIZED", caseId: item.caseId, payload: { ...result, aiEscalated: false } });
+  results.push(result);
+  finalizedPrimaries.add(primaryKey(item.primary.side, item.primary.recordId));
+}
+
+function noCandidateResult(primary: CandidatePrimary, caseIdValue: string, finalizationOrder: number): FinalReconciliationResult {
+  return {
+    caseId: caseIdValue,
+    outcome: "UNRESOLVED",
+    bankRecordIds: primary.side === "BANK" ? [primary.recordId] : [],
+    ledgerRecordIds: primary.side === "LEDGER" ? [primary.recordId] : [],
+    reasonCode: "NO_CANDIDATE",
+    source: "DETERMINISTIC",
+    reason: "No viable reconciliation candidate was found; AI reasoning cannot add evidence.",
+    finalizationOrder,
+  };
+}
+
+function mechanicalExceptionResult(
+  records: RecordLookup,
+  primary: CandidatePrimary,
+  usedRecords: UsedRecordState,
+  asOfDate: string,
+  caseIdValue: string,
+  finalizationOrder: number,
+): FinalReconciliationResult | undefined {
+  if (primary.side !== "LEDGER") return undefined;
+  const maturityDate = records.ledgerRecords.get(primary.recordId)?.maturityDate;
+  if (maturityDate === null || maturityDate === undefined || maturityDate <= asOfDate) return undefined;
+  if (generateCandidates({ primary, records, usedRecords }).candidates.length > 0) return undefined;
+  return {
+    caseId: caseIdValue,
+    outcome: "EXPLAINED_OUTSTANDING",
+    bankRecordIds: [],
+    ledgerRecordIds: [primary.recordId],
+    reasonCode: "TIMING_DIFFERENCE",
+    source: "DETERMINISTIC",
+    reason: `Ledger maturity date ${maturityDate} is after the run as-of date ${asOfDate}.`,
+    finalizationOrder,
+  };
 }
 
 /** Execute the non-model half of a run and return durable, JSON-safe work units. */
@@ -281,24 +372,56 @@ export function planReconciliation(input: Pick<RunReconciliationInput, "runId" |
       onDecisionCommitted: (event) => {
         const currentCaseId = caseId(event.anchorSide, event.anchorId);
         trace.record({ type: "AUTO_RECONCILED", caseId: currentCaseId, payload: { rule: event.rule, bankRecordIds: event.bankRecordIds, ledgerRecordIds: event.ledgerRecordIds, reasonCode: event.reasonCode } });
-        trace.record({ type: "CASE_FINALIZED", caseId: currentCaseId, payload: { outcome: "RECONCILED", bankRecordIds: event.bankRecordIds, ledgerRecordIds: event.ledgerRecordIds, reasonCode: event.reasonCode } });
+        trace.record({ type: "CASE_FINALIZED", caseId: currentCaseId, payload: { outcome: "RECONCILED", bankRecordIds: event.bankRecordIds, ledgerRecordIds: event.ledgerRecordIds, reasonCode: event.reasonCode, source: "DETERMINISTIC", aiEscalated: false, reason: `Resolved by deterministic rule ${event.rule}.` } });
         deterministicResults.push({ caseId: currentCaseId, outcome: "RECONCILED", bankRecordIds: event.bankRecordIds, ledgerRecordIds: event.ledgerRecordIds, reasonCode: event.reasonCode, source: "DETERMINISTIC", rule: event.rule, finalizationOrder: deterministicResults.length + 1 });
       },
     },
   });
-  const usedRecords = deterministic.usedRecords;
-  const components: PlannedReasoningComponent[] = deterministic.decisions
+  const usedRecords = cloneUsedRecords(deterministic.usedRecords);
+  const reasoningDecisions = deterministic.decisions
     .filter((decision): decision is Extract<DeterministicDecision, { status: "NEEDS_REASONING" }> => decision.status === "NEEDS_REASONING")
-    .sort(compareReasoningDecisions)
-    .map((decision, index) => {
-      const primary = primaryForDecision(decision);
-      const candidateSet = pruneCandidatesForReasoning(generateCandidates({ primary, records, usedRecords, requiredCandidateIds: decision.bankRecordIds.concat(decision.ledgerRecordIds) })).candidateSet;
-      const componentId = `${input.runId}:component:${index + 1}`;
-      const currentCaseId = startCase(primary.side, primary.recordId);
-      trace.record({ type: "CANDIDATES_GENERATED", caseId: currentCaseId, payload: { primarySide: primary.side, primaryRecordId: primary.recordId, candidateRecordIds: candidateSet.candidates.map((candidate) => candidate.recordId), totalEligibleCandidates: candidateSet.totalEligibleCandidates, truncated: candidateSet.truncated } });
-      return { componentId, caseId: currentCaseId, primary, candidateSet, decision, promptInput: buildReconciliationReasoningInput({ primary: reasoningPrimary(records, primary), candidateSet, records, runContext: { asOfDate: input.asOfDate } }), bankRecords, ledgerRecords };
-    });
-  trace.record({ type: "RUN_PLANNED", payload: { totalWorkItems: components.length, deterministicResults: deterministicResults.length, reasoningComponents: components.length } });
+    .sort(compareReasoningDecisions);
+  const pendingReasoningDecisions: typeof reasoningDecisions = [];
+  for (const decision of reasoningDecisions) {
+    const primary = primaryForDecision(decision);
+    const result = mechanicalExceptionResult(records, primary, usedRecords, input.asOfDate, caseId(primary.side, primary.recordId), deterministicResults.length + 1);
+    if (result === undefined) {
+      pendingReasoningDecisions.push(decision);
+      continue;
+    }
+    startCase(primary.side, primary.recordId);
+    deterministicResults.push(result);
+    addPrimary(primary, usedRecords);
+    trace.record({ type: "CASE_FINALIZED", caseId: result.caseId, payload: { ...result, aiEscalated: false } });
+  }
+  const selectedReasoningDecisions = selectConnectedReasoningDecisions(pendingReasoningDecisions, records, usedRecords);
+  const components: PlannedReasoningComponent[] = [];
+  for (const selection of selectedReasoningDecisions) {
+    const decision = selection.decision;
+    const primary = primaryForDecision(decision);
+    const candidateSet = pruneCandidatesForReasoning(generateCandidates({ primary, records, usedRecords, requiredCandidateIds: decision.bankRecordIds.concat(decision.ledgerRecordIds) })).candidateSet;
+    const currentCaseId = startCase(primary.side, primary.recordId);
+    trace.record({ type: "CANDIDATES_GENERATED", caseId: currentCaseId, payload: { primarySide: primary.side, primaryRecordId: primary.recordId, candidateRecordIds: candidateSet.candidates.map((candidate) => candidate.recordId), candidates: traceCandidates(candidateSet), totalEligibleCandidates: candidateSet.totalEligibleCandidates, truncated: candidateSet.truncated } });
+    if (!shouldEscalateToAI(candidateSet)) {
+      const result = noCandidateResult(primary, currentCaseId, deterministicResults.length + 1);
+      deterministicResults.push(result);
+      trace.record({ type: "CASE_FINALIZED", caseId: currentCaseId, payload: { ...result, aiEscalated: false } });
+      continue;
+    }
+    components.push({ componentId: `${input.runId}:component:${components.length + 1}`, caseId: currentCaseId, primary, candidateSet, decision, promptInput: buildReconciliationReasoningInput({ primary: reasoningPrimary(records, primary), candidateSet, records, runContext: { asOfDate: input.asOfDate } }), unresolvedBankRecordIds: selection.unresolvedBankRecordIds, unresolvedLedgerRecordIds: selection.unresolvedLedgerRecordIds, bankRecords, ledgerRecords });
+  }
+  const logicalCases = deterministicResults.length + components.length;
+  trace.record({ type: "RUN_PLANNED", payload: {
+    totalWorkItems: components.length,
+    deterministicResults: deterministicResults.length,
+    reasoningComponents: components.length,
+    totalSourceRecords: bankRecords.length + ledgerRecords.length,
+    logicalCases,
+    deterministicallyResolved: deterministicResults.filter((result) => result.outcome === "RECONCILED").length,
+    deterministicExceptions: deterministicResults.filter((result) => result.outcome !== "RECONCILED").length,
+    aiEscalations: components.length,
+    aiEscalationRate: logicalCases === 0 ? 0 : components.length / logicalCases,
+  } });
   return { runId: input.runId, asOfDate: input.asOfDate, bankRecords, ledgerRecords, deterministicResults, deterministicUsedBankRecordIds: [...usedRecords.bankRecordIds], deterministicUsedLedgerRecordIds: [...usedRecords.ledgerRecordIds], components, trace: trace.getEvents() };
 }
 
@@ -306,9 +429,9 @@ export async function processPlannedComponent(
   input: { runId: string; asOfDate: string; component: PlannedReasoningComponent; modelAdapter: RunReconciliationInput["modelAdapter"]; usedRecords?: { bankRecordIds: Set<string>; ledgerRecordIds: Set<string> }; signal?: AbortSignal; onProviderRequestStart?: () => void },
 ): Promise<{ result: FinalReconciliationResult; trace: readonly RecordedTraceEvent[] }> {
   const records = createRecordLookup(input.component.bankRecords, input.component.ledgerRecords);
-  const item: PreparedReasoningItem = { ...input.component, skipReciprocalAttempt: false };
+  const item: PreparedReasoningItem = { ...input.component, coverComponentOnUnresolved: true };
   const trace = createTraceRecorder({ runId: `${input.runId}:component:${input.component.componentId}` });
-  trace.record({ type: "AGENT_STARTED", caseId: input.component.caseId, payload: { primarySide: input.component.primary.side, primaryRecordId: input.component.primary.recordId, candidateCount: input.component.candidateSet.candidates.length } });
+  trace.record({ type: "AGENT_STARTED", caseId: input.component.caseId, payload: { primarySide: input.component.primary.side, primaryRecordId: input.component.primary.recordId, candidateCount: input.component.candidateSet.candidates.length, escalationReason: input.component.decision.reason } });
   const usedRecords = input.usedRecords ?? cloneUsedRecords(emptyUsedRecordState());
   const proposal = await generateProposalWithVerifierRetry(item, input.modelAdapter.generateProposal.bind(input.modelAdapter), records, input.asOfDate, cloneUsedRecords(usedRecords), trace, input.signal, undefined, input.onProviderRequestStart);
   const results: FinalReconciliationResult[] = [];
@@ -332,21 +455,8 @@ export async function processPlannedBatch(input: {
     for (const component of input.components) processed.push(await processPlannedComponent({ ...input, component, usedRecords }));
     return { results: processed.map((item) => item.result), trace: processed.flatMap((item) => item.trace) };
   }
-  if (input.modelAdapter.generateBatchProposal === undefined) {
-    const processed = await Promise.all(input.components.map((component) => processPlannedComponent({ ...input, component })));
-    return { results: processed.map((item) => item.result), trace: processed.flatMap((item) => item.trace) };
-  }
-  const response = await input.modelAdapter.generateBatchProposal({ items: input.components.map((component) => ({ componentId: component.componentId, ...component.promptInput })), signal: input.signal, onProviderRequestStart: input.onProviderRequestStart });
-  const proposals = parseReasoningBatchResponse(response, input.components.map((component) => component.componentId));
-  const results: FinalReconciliationResult[] = [];
-  const traces: RecordedTraceEvent[] = [];
-  for (const component of input.components) {
-    const proposal = proposals.find((item) => item.componentId === component.componentId)!.proposal;
-    const processed = await processPlannedComponentWithProposal(input, component, proposal);
-    results.push(processed.result);
-    traces.push(...processed.trace);
-  }
-  return { results, trace: traces };
+  const processed = await Promise.all(input.components.map((component) => processPlannedComponent({ ...input, component })));
+  return { results: processed.map((item) => item.result), trace: processed.flatMap((item) => item.trace) };
 }
 
 function componentsOverlap(components: readonly PlannedReasoningComponent[]): boolean {
@@ -360,28 +470,6 @@ function componentsOverlap(components: readonly PlannedReasoningComponent[]): bo
     ids.forEach((id) => seen.add(id));
   }
   return false;
-}
-
-async function processPlannedComponentWithProposal(
-  input: { runId: string; asOfDate: string; modelAdapter: RunReconciliationInput["modelAdapter"]; signal?: AbortSignal; onProviderRequestStart?: () => void },
-  component: PlannedReasoningComponent,
-  initialProposal: AgentProposal,
-): Promise<{ result: FinalReconciliationResult; trace: readonly RecordedTraceEvent[] }> {
-  const records = createRecordLookup(component.bankRecords, component.ledgerRecords);
-  const item: PreparedReasoningItem = { ...component, skipReciprocalAttempt: false };
-  const trace = createTraceRecorder({ runId: `${input.runId}:component:${component.componentId}` });
-  trace.record({ type: "AGENT_STARTED", caseId: component.caseId, payload: { primarySide: component.primary.side, primaryRecordId: component.primary.recordId, candidateCount: component.candidateSet.candidates.length } });
-  trace.record({ type: "AGENT_PROPOSED", caseId: component.caseId, payload: initialProposal });
-  let proposal = initialProposal;
-  const firstVerification = verifyAgentProposal(item, proposal, records, input.asOfDate, emptyUsedRecordState());
-  if (firstVerification.status === "REJECTED" && firstVerification.failures.some((failure) => isRepairableModelFailure(failure.code))) {
-    trace.record({ type: "REPAIR_STARTED", payload: { workItemId: component.componentId, repairAttempt: 1 } });
-    proposal = await input.modelAdapter.generateProposal({ ...component.promptInput, retryFeedback: JSON.stringify({ caseId: component.caseId, verifierFailures: firstVerification.failures }), signal: input.signal, onProviderRequestStart: input.onProviderRequestStart });
-    trace.record({ type: "AGENT_PROPOSED", caseId: component.caseId, payload: proposal });
-  }
-  const output: FinalReconciliationResult[] = [];
-  finalizeAgentProposal(item, proposal, records, input.runId, input.asOfDate, cloneUsedRecords(), new Set(), output, trace);
-  return { result: output[0]!, trace: trace.getEvents() };
 }
 
 function throwIfAborted(signal: AbortSignal | undefined): void {
@@ -438,6 +526,10 @@ function finalizeAgentProposal(
   trace.record({ type: "VERIFICATION_CHECKED", caseId: item.caseId, payload: verificationPayload(verification) });
 
   const result = finalizeAgentResult(item.caseId, item.primary, proposal, verification);
+  if (result.outcome === "UNRESOLVED" && item.coverComponentOnUnresolved === true) {
+    result.bankRecordIds = investigationRecordIds(item, "BANK");
+    result.ledgerRecordIds = investigationRecordIds(item, "LEDGER");
+  }
   result.finalizationOrder = results.length + 1;
   trace.record({
     type: "CASE_FINALIZED",
@@ -447,6 +539,9 @@ function finalizeAgentProposal(
       bankRecordIds: result.bankRecordIds,
       ledgerRecordIds: result.ledgerRecordIds,
       reasonCode: result.reasonCode,
+      source: result.source,
+      reason: result.reason,
+      aiEscalated: true,
     },
   });
   results.push(result);
@@ -484,11 +579,13 @@ async function generateProposalWithVerifierRetry(
   for (let attempt = 0; attempt < 1; attempt += 1) {
     const verification = verifyAgentProposal(item, proposal, records, asOfDate, usedRecords);
     if (verification.status !== "REJECTED" || !verification.failures.some((failure) => isRepairableModelFailure(failure.code))) return proposal;
+    trace.record({ type: "VERIFICATION_CHECKED", caseId: item.caseId, payload: verificationPayload(verification) });
     const feedback = verification.failures.map((failure) => ({
       code: failure.code,
       message: failure.message,
       recordIds: failure.recordIds ?? [],
     }));
+    trace.record({ type: "REPAIR_STARTED", payload: { caseId: item.caseId, repairAttempt: attempt + 1 } });
     onRepair?.();
     proposal = await requestProposal({
       ...item.promptInput,
@@ -512,12 +609,83 @@ function pruneCandidatesForReasoning(candidateSet: CandidateSet): { candidateSet
   return { candidateSet: { ...candidateSet, candidates, truncated: true }, prunedCount };
 }
 
-function singletonPairKey(primary: CandidatePrimary, candidateSet: CandidateSet): string | undefined {
-  if (candidateSet.candidates.length !== 1) return undefined;
-  const candidate = candidateSet.candidates[0]!;
-  const bankRecordId = primary.side === "BANK" ? primary.recordId : candidate.recordId;
-  const ledgerRecordId = primary.side === "LEDGER" ? primary.recordId : candidate.recordId;
-  return `${bankRecordId}\u0000${ledgerRecordId}`;
+function selectConnectedReasoningDecisions(
+  decisions: readonly Extract<DeterministicDecision, { status: "NEEDS_REASONING" }>[],
+  records: RecordLookup,
+  usedRecords: UsedRecordState,
+): SelectedReasoningDecision[] {
+  const items = decisions.map((decision) => {
+    const primary = primaryForDecision(decision);
+    const candidateSet = pruneCandidatesForReasoning(generateCandidates({ primary, records, usedRecords, requiredCandidateIds: decision.bankRecordIds.concat(decision.ledgerRecordIds) })).candidateSet;
+    return { decision, primary, candidateSet };
+  });
+  const byPrimary = new Map(items.map((item) => [primaryKey(item.primary.side, item.primary.recordId), item]));
+  const covered = new Set<string>();
+  const selectedItems: typeof items = [];
+  const hubs = items.filter((item) => componentCandidates(item.candidateSet).length > 1).sort((left, right) =>
+    componentCandidates(right.candidateSet).length - componentCandidates(left.candidateSet).length
+    || compareReasoningDecisions(left.decision, right.decision));
+  for (const hub of hubs) {
+    const hubKey = primaryKey(hub.primary.side, hub.primary.recordId);
+    const candidates = componentCandidates(hub.candidateSet);
+    const isIsolatedStar = candidates.every((candidate) => {
+      const leaf = byPrimary.get(primaryKey(candidate.side, candidate.recordId));
+      const leafCandidates = leaf === undefined ? [] : componentCandidates(leaf.candidateSet);
+      return leafCandidates.length === 1
+        && leafCandidates[0]!.side === hub.primary.side
+        && leafCandidates[0]!.recordId === hub.primary.recordId;
+    });
+    if (!isIsolatedStar || covered.has(hubKey) || candidates.some((candidate) => covered.has(primaryKey(candidate.side, candidate.recordId)))) continue;
+    selectedItems.push(hub);
+    covered.add(hubKey);
+    candidates.forEach((candidate) => covered.add(primaryKey(candidate.side, candidate.recordId)));
+  }
+  for (const item of items.sort((left, right) => compareReasoningDecisions(left.decision, right.decision))) {
+    const itemKey = primaryKey(item.primary.side, item.primary.recordId);
+    if (covered.has(itemKey)) continue;
+    const reciprocalAlreadySelected = selectedItems.some((existing) =>
+      existing.candidateSet.candidates.some((candidate) => candidate.side === item.primary.side && candidate.recordId === item.primary.recordId)
+      && item.candidateSet.candidates.some((candidate) => candidate.side === existing.primary.side && candidate.recordId === existing.primary.recordId));
+    if (reciprocalAlreadySelected) continue;
+    selectedItems.push(item);
+    covered.add(itemKey);
+  }
+  return selectedItems.sort((left, right) => compareReasoningDecisions(left.decision, right.decision)).map((item) => {
+    const candidates = componentCandidates(item.candidateSet);
+    return {
+      decision: item.decision,
+      unresolvedBankRecordIds: [
+        ...(item.primary.side === "BANK" ? [item.primary.recordId] : []),
+        ...candidates.filter((candidate) => candidate.side === "BANK").map((candidate) => candidate.recordId),
+      ].sort(),
+      unresolvedLedgerRecordIds: [
+        ...(item.primary.side === "LEDGER" ? [item.primary.recordId] : []),
+        ...candidates.filter((candidate) => candidate.side === "LEDGER").map((candidate) => candidate.recordId),
+      ].sort(),
+    };
+  });
+}
+
+function investigationRecordIds(item: PreparedReasoningItem, side: CandidatePrimary["side"]): string[] {
+  return side === "BANK" ? item.unresolvedBankRecordIds : item.unresolvedLedgerRecordIds;
+}
+
+function componentCandidates(candidateSet: CandidateSet): CandidateSet["candidates"] {
+  const strong = candidateSet.candidates.filter((candidate) =>
+    candidate.selectionTier === "EXACT_REFERENCE"
+    || candidate.selectionTier === "NORMALIZED_REFERENCE"
+    || candidate.selectionTier === "EXACT_BATCH");
+  return strong.length > 0 ? strong : candidateSet.candidates.length === 1 ? candidateSet.candidates : [];
+}
+
+function traceCandidates(candidateSet: CandidateSet) {
+  return candidateSet.candidates.map((candidate) => ({
+    side: candidate.side,
+    recordId: candidate.recordId,
+    selectionTier: candidate.selectionTier,
+    signals: [...candidate.signals],
+    facts: { ...candidate.facts },
+  }));
 }
 
 function verifyAgentProposal(
@@ -566,25 +734,6 @@ function insufficientEvidenceProposal(primary: CandidatePrimary, failureCode = "
     }],
     conflictingEvidence: [],
     reason: `The model response failed with ${failureCode}, so this case remains unresolved.`,
-  };
-}
-
-function reciprocalAttemptProposal(primary: CandidatePrimary): AgentProposal {
-  const bankRecordIds = primary.side === "BANK" ? [primary.recordId] : [];
-  const ledgerRecordIds = primary.side === "LEDGER" ? [primary.recordId] : [];
-  return {
-    proposedOutcome: "INSUFFICIENT_EVIDENCE",
-    bankRecordIds,
-    ledgerRecordIds,
-    confidence: "LOW",
-    evidence: [{
-      statement: "The same one-to-one relationship was already evaluated from its reciprocal record.",
-      source: "DETERMINISTIC",
-      kind: "DETERMINISTIC",
-      recordIds: [...bankRecordIds, ...ledgerRecordIds],
-    }],
-    conflictingEvidence: [],
-    reason: "The reciprocal candidate relationship was already evaluated, so this duplicate model request was skipped.",
   };
 }
 

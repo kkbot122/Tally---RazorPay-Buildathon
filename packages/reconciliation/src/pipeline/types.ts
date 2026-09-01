@@ -92,6 +92,8 @@ export type PlannedReasoningComponent = {
   candidateSet: CandidateSet;
   decision: Extract<import("../deterministic/index.js").DeterministicDecision, { status: "NEEDS_REASONING" }>;
   promptInput: { input: string };
+  unresolvedBankRecordIds: string[];
+  unresolvedLedgerRecordIds: string[];
   bankRecords: ParsedBankTransaction[];
   ledgerRecords: ParsedLedgerTransaction[];
 };

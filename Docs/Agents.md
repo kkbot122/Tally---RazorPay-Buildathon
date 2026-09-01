@@ -967,7 +967,7 @@ Do not mix them.
 
 Never log:
 
-* `OPENAI_API_KEY`
+* `GROQ_API_KEY`
 * database passwords
 * connection strings containing secrets
 

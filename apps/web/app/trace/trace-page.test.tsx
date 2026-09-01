@@ -29,7 +29,15 @@ const deterministicEvents: TraceEvent[] = [
 const reasoningEvents: TraceEvent[] = [
   event("RUN_STARTED", 1, null),
   event("CASE_STARTED", 2, "BANK:A", { primarySide: "BANK", primaryRecordId: "A" }),
-  event("CANDIDATES_GENERATED", 3, "BANK:A", { candidateRecordIds: ["L1", "L2"], totalEligibleCandidates: 2, truncated: false }),
+  event("CANDIDATES_GENERATED", 3, "BANK:A", {
+    candidateRecordIds: ["L1", "L2"],
+    candidates: [
+      { side: "LEDGER", recordId: "L1", selectionTier: "REFERENCE", signals: ["NORMALIZED_REFERENCE"], facts: { amountPaise: "125000", currency: "INR", date: "2026-08-23" } },
+      { side: "LEDGER", recordId: "L2", selectionTier: "CONTEXT", signals: ["AMOUNT", "DATE_WINDOW"], facts: { amountPaise: "125000", currency: "INR", date: "2026-08-24" } },
+    ],
+    totalEligibleCandidates: 2,
+    truncated: false,
+  }),
   event("AGENT_STARTED", 4, "BANK:A", { candidateCount: 2, primarySide: "BANK", primaryRecordId: "A" }),
   event("AGENT_PROPOSED", 5, "BANK:A", { proposedOutcome: "MATCH", bankRecordIds: ["A"], ledgerRecordIds: ["L1"], confidence: "HIGH", reason: "The references describe the same event.", evidence: [{ statement: "Reference evidence", source: "CROSS_RECORD", recordIds: ["A", "L1"] }], conflictingEvidence: [] }),
   event("VERIFICATION_CHECKED", 6, "BANK:A", { result: { status: "REJECTED", failures: [{ code: "AMOUNT_MISMATCH", message: "The proposed relationship does not balance exactly.", recordIds: ["A", "L1"] }] } }),
@@ -80,9 +88,13 @@ describe("T032 reconciliation trace", () => {
     api.getRunTrace.mockResolvedValue(reasoningEvents);
     render(<TracePage runId="run-test" />);
     await waitFor(() => expect(screen.getByText("Candidates generated")).toBeTruthy());
-    expect(screen.getByText("2 eligible candidates generated")).toBeTruthy();
-    expect(screen.getByText("Agent proposal")).toBeTruthy();
     const rows = screen.getAllByRole("listitem");
+    expect(screen.getByText("2 eligible candidates generated")).toBeTruthy();
+    fireEvent.click(within(rows[2]!).getByRole("button", { name: "Show details" }));
+    expect(screen.getByText("Candidate L1")).toBeTruthy();
+    expect(screen.getByText("Normalized Reference")).toBeTruthy();
+    expect(screen.getAllByText("INR")).toHaveLength(2);
+    expect(screen.getByText("Agent proposal")).toBeTruthy();
     fireEvent.click(within(rows[4]!).getByRole("button", { name: "Show details" }));
     expect(screen.getByText("The references describe the same event.")).toBeTruthy();
     fireEvent.click(within(rows[5]!).getByRole("button", { name: "Show details" }));
@@ -92,6 +104,35 @@ describe("T032 reconciliation trace", () => {
     expect(screen.getByText("Records: A, L1")).toBeTruthy();
     expect(screen.getByText("Case finalized")).toBeTruthy();
     expect(screen.getByText(/Unresolved · Verification Failed/)).toBeTruthy();
+  });
+
+  it("renders run workload metrics as an operational summary", async () => {
+    api.getRunTrace.mockResolvedValue([
+      event("RUN_COMPLETED", 1, null, {
+        casesProcessed: 20,
+        metrics: {
+          totalSourceRecords: 45,
+          logicalCases: 20,
+          deterministicallyResolved: 11,
+          deterministicExceptions: 3,
+          aiEscalations: 6,
+          aiEscalationRate: 0.3,
+          initialAiCalls: 6,
+          aiRepairCalls: 0,
+          aiProposalsAccepted: 6,
+          aiProposalsRejected: 0,
+          aiAbstentions: 2,
+          totalModelCalls: 6,
+          durationMs: 17,
+        },
+      }),
+    ]);
+    render(<TracePage runId="run-test" />);
+    await waitFor(() => expect(screen.getByText("20 investigations · 6 AI escalations · 6 model calls")).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Show details" }));
+    expect(screen.getByText("30% escalation rate")).toBeTruthy();
+    expect(screen.getByText("14 deterministic")).toBeTruthy();
+    expect(screen.getByText("2 abstentions")).toBeTruthy();
   });
 
   it("uses the persisted final outcome for finalization styling", async () => {
