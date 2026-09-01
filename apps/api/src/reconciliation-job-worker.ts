@@ -87,7 +87,13 @@ export function createReconciliationJobWorker(options: ReconciliationJobWorkerOp
 
   async function run(runId?: string): Promise<void> {
     while (!stopped) {
-      const count = await runOnce(runId);
+      let count = 0;
+      try {
+        count = await runOnce(runId);
+      } catch {
+        // A transient database failure must not silently kill the durable
+        // worker; the next poll can reclaim the pending item.
+      }
       if (count === 0) await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
     }
   }

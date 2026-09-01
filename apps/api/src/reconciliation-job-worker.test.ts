@@ -47,6 +47,25 @@ describe("reconciliation job worker", () => {
     expect(repo.releaseWorkItem).toHaveBeenCalledWith("run:work:1", "worker", "WORKER_SLICE_EXPIRED");
   });
 
+  it("keeps polling after a claim failure", async () => {
+    let attempts = 0;
+    const repo = repository(async () => {
+      attempts += 1;
+      if (attempts === 1) throw new Error("temporary database failure");
+      return attempts === 2 ? item() : undefined;
+    });
+    let processed!: () => void;
+    const didProcess = new Promise<void>((resolve) => { processed = resolve; });
+    const worker = createReconciliationJobWorker({ repository: repo, owner: "worker", pollIntervalMs: 1, processWorkItem: async () => processed() });
+
+    const running = worker.run();
+    await didProcess;
+    worker.stop();
+    await running;
+
+    expect(repo.completeWorkItem).toHaveBeenCalledOnce();
+  });
+
   it("aborts in-flight provider work when its run is cancelled", async () => {
     const repo = repository(async () => item());
     let entered!: () => void;
