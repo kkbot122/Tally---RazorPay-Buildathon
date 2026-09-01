@@ -66,6 +66,22 @@ describe("reconciliation job worker", () => {
     expect(repo.completeWorkItem).toHaveBeenCalledOnce();
   });
 
+  it("claims recoverable runs with an explicit run ID", async () => {
+    const repo = repository(async () => undefined);
+    let polls = 0;
+    let worker!: ReturnType<typeof createReconciliationJobWorker>;
+    repo.getRecoverableRunIds = vi.fn(async () => {
+      polls += 1;
+      if (polls > 1) worker.stop();
+      return polls === 1 ? ["run"] : [];
+    });
+    worker = createReconciliationJobWorker({ repository: repo, owner: "worker", pollIntervalMs: 1, processWorkItem: async () => {} });
+
+    await worker.run();
+
+    expect(repo.claimWorkItem).toHaveBeenCalledWith({ runId: "run", owner: "worker", leaseMs: 60_000 });
+  });
+
   it("aborts in-flight provider work when its run is cancelled", async () => {
     const repo = repository(async () => item());
     let entered!: () => void;
