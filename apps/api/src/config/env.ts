@@ -20,6 +20,13 @@ export const EnvSchema = z.object({
   /** A shared value for every replica using the same Groq organization. */
   AI_GROQ_QUOTA_SCOPE: z.string().trim().min(1).max(200).default(DEFAULT_GROQ_QUOTA_SCOPE),
   AI_RUN_DEADLINE_MS: z.coerce.number().int().min(10_000).max(600_000).default(90_000),
+  /** Durable worker controls. Undefined values use deployment-safe defaults. */
+  AI_WORKER_POLL_INTERVAL_MS: z.coerce.number().int().min(100).max(60_000).optional(),
+  AI_WORKER_CONCURRENCY: z.coerce.number().int().min(1).max(20).optional(),
+  AI_WORKER_LEASE_MS: z.coerce.number().int().min(1_000).max(600_000).optional(),
+  AI_WORKER_SLICE_MS: z.coerce.number().int().min(1_000).max(600_000).optional(),
+  AI_MAX_REASONING_ITEMS_PER_REQUEST: z.coerce.number().int().min(1).max(5).optional(),
+  AI_REASONING_COMPLETION_TOKEN_CAP: z.coerce.number().int().min(128).max(16_384).optional(),
   WEB_ORIGIN: z.string().url().default("http://localhost:3000"),
   TALLY_E2E_DETERMINISTIC_ADAPTER: z.enum(["true", "false"]).optional(),
 });
@@ -28,6 +35,26 @@ export const DEFAULT_NVIDIA_MODEL = "nvidia/nemotron-3.5-lightning-30b-a3b";
 export const DEFAULT_GROQ_MODEL = DEFAULT_GROQ_REASONING_MODEL;
 
 export type AppConfig = z.infer<typeof EnvSchema>;
+
+export const DEFAULT_WORKER_CONFIGURATION = {
+  pollIntervalMs: 1_000,
+  concurrency: 1,
+  leaseMs: 60_000,
+  sliceMs: 30_000,
+  maxReasoningItemsPerRequest: 3,
+  completionTokenCap: 1_536,
+} as const;
+
+export function workerConfiguration(config: AppConfig) {
+  return {
+    pollIntervalMs: config.AI_WORKER_POLL_INTERVAL_MS ?? DEFAULT_WORKER_CONFIGURATION.pollIntervalMs,
+    concurrency: config.AI_WORKER_CONCURRENCY ?? DEFAULT_WORKER_CONFIGURATION.concurrency,
+    leaseMs: config.AI_WORKER_LEASE_MS ?? DEFAULT_WORKER_CONFIGURATION.leaseMs,
+    sliceMs: config.AI_WORKER_SLICE_MS ?? DEFAULT_WORKER_CONFIGURATION.sliceMs,
+    maxReasoningItemsPerRequest: config.AI_MAX_REASONING_ITEMS_PER_REQUEST ?? DEFAULT_WORKER_CONFIGURATION.maxReasoningItemsPerRequest,
+    completionTokenCap: config.AI_REASONING_COMPLETION_TOKEN_CAP ?? DEFAULT_WORKER_CONFIGURATION.completionTokenCap,
+  };
+}
 
 export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppConfig {
   const parsed = EnvSchema.parse(environment);

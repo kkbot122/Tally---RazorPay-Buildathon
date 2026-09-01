@@ -132,7 +132,6 @@ export default function Dashboard() {
         setSummary(nextSummary);
         throw Object.assign(new Error(`Run ${runId} failed operationally; no finance outcome was produced.`), { code: "RUN_FAILED" });
       }
-      if (nextSummary.status !== "COMPLETED") throw new Error(`Run ${runId} is still ${nextSummary.status.toLowerCase()}.`);
       const nextResults = await getRunResults(runId);
       setSummary(nextSummary);
       setResults(nextResults);
@@ -159,7 +158,17 @@ export default function Dashboard() {
         await loadRunData(runId);
         return;
       }
-      setStatusMessage(`Reconciliation is ${nextSummary.status.toLowerCase()}…`);
+      if (nextSummary.status === "CANCELLED") {
+        await loadRunData(runId);
+        setStatusMessage("Run cancelled. Persisted results are shown as partial progress.");
+        return;
+      }
+      try {
+        const partialResults = await getRunResults(runId);
+        setResults(partialResults);
+        setHasLoadedRunData(true);
+      } catch { /* Results may not exist until planning commits. */ }
+      setStatusMessage(`Reconciliation is ${nextSummary.status.toLowerCase()}… ${nextSummary.completedWorkItems ?? nextSummary.totalCases} completed`);
       if (Date.now() >= deadline) throw new Error("The reconciliation run exceeded the client wait limit.");
       await new Promise<void>((resolve) => window.setTimeout(resolve, 1000));
     }
@@ -271,7 +280,7 @@ export default function Dashboard() {
           <>
             <section className={`${surface} mb-6 p-[18px] sm:px-5 sm:pb-5`} aria-labelledby="summary-heading">
               <h2 id="summary-heading" className={sectionTitle}>Run summary</h2>
-              <p className={sectionDescription}>Operational counts from {summary.runId}; no benchmark or ground-truth metrics are used.</p>
+              <p className={sectionDescription}>Operational counts from {summary.runId}; no benchmark or ground-truth metrics are used.{summary.status !== "COMPLETED" && " Results are partial until the run completes."}</p>
               <div className="mt-4 grid grid-cols-2 border-y border-tally-border-subtle sm:grid-cols-3 lg:grid-cols-6">
                 {[["Processed", total, "final results"], ["Reconciled", reconciled, `${percentage(reconciled, total)} of total`], ["Exceptions", explained + discrepancy + unresolved, "needs review or context"], ["Explained outstanding", explained, ""], ["Discrepancies", discrepancy, ""], ["Resolution rate", percentage(resolved, total), "not unresolved"]].map(([label, value, subtext], index) => <div className={`${metricSeparatorClasses(index)} min-h-[82px] border-tally-border-subtle px-4 py-[13px] first:pl-0`} key={label}><span className={fieldLabel}>{label}</span><strong className="mt-1.5 block text-2xl font-semibold leading-7 tabular-nums">{value}</strong>{subtext !== "" && <span className="text-xs text-tally-ink-muted">{subtext}</span>}</div>)}
               </div>

@@ -3,7 +3,7 @@ import Fastify from "fastify";
 import { CsvValidationError, DEFAULT_REASONING_CONCURRENCY, GroqRateLimiter, OpenAICompatibleChatCompletionsAdapter, OpenAIResponsesAdapter } from "@tally/reconciliation";
 import { ZodError } from "zod";
 import type { AppConfig } from "./config/env.js";
-import { loadConfig, useE2EDeterministicAdapter } from "./config/env.js";
+import { loadConfig, useE2EDeterministicAdapter, workerConfiguration } from "./config/env.js";
 import { createDatabase } from "./db/client.js";
 import { createReconciliationRunRepository } from "./db/reconciliation-run-repository.js";
 import { BenchmarkEvaluationError, createBenchmarkEvaluationService, type BenchmarkEvaluationResponse } from "./benchmark-evaluation-service.js";
@@ -43,6 +43,7 @@ export function buildApp(
   evaluationService?: BenchmarkEvaluationService,
 ) {
   const app = Fastify({ logger: true });
+  const durableConfiguration = workerConfiguration(config);
   const addCorsHeaders = (reply: { header: (name: string, value: string) => unknown }, origin: string | undefined) => {
     if (origin !== config.WEB_ORIGIN) return;
     reply.header("Access-Control-Allow-Origin", origin);
@@ -70,7 +71,7 @@ export function buildApp(
     useE2EDeterministicAdapter(config)
       ? createE2EReasoningAdapter()
       : config.AI_PROVIDER === "openai"
-        ? new OpenAIResponsesAdapter({ apiKey: config.OPENAI_API_KEY, model: config.OPENAI_MODEL, baseURL: config.AI_BASE_URL, timeout: config.AI_REQUEST_TIMEOUT_MS, maxRetries: config.AI_MAX_RETRIES })
+        ? new OpenAIResponsesAdapter({ apiKey: config.OPENAI_API_KEY, model: config.OPENAI_MODEL, baseURL: config.AI_BASE_URL, timeout: config.AI_REQUEST_TIMEOUT_MS, maxRetries: config.AI_MAX_RETRIES, maxCompletionTokens: durableConfiguration.completionTokenCap })
         : new OpenAICompatibleChatCompletionsAdapter({
             provider: config.AI_PROVIDER,
             apiKey: config.AI_PROVIDER === "groq" ? config.GROQ_API_KEY : config.OPENAI_API_KEY,
@@ -79,6 +80,7 @@ export function buildApp(
             reasoningEffort: config.AI_REASONING_EFFORT,
             timeout: config.AI_REQUEST_TIMEOUT_MS,
             maxRetries: config.AI_MAX_RETRIES,
+            maxCompletionTokens: durableConfiguration.completionTokenCap,
             groqRateLimiter: config.AI_PROVIDER === "groq" && database.sql !== undefined
               ? new GroqRateLimiter(new PostgresGroqQuotaStateStore(database.sql), {
                   requestsPerMinute: config.AI_GROQ_REQUESTS_PER_MINUTE,
@@ -93,14 +95,16 @@ export function buildApp(
     config.AI_REASONING_CONCURRENCY ?? DEFAULT_REASONING_CONCURRENCY,
     (event) => app.log.error(event, event.failurePersistenceFailed ? "run failure persistence failed" : "reconciliation run failed"),
     (event) => app.log.warn(event, "model request failed"),
-    config.AI_RUN_DEADLINE_MS,
+    config.AI_WORKER_SLICE_MS ?? 30_000,
     config.AI_MAX_REASONING_CALLS_PER_RUN,
+    durableConfiguration,
   ));
   const benchmarkEvaluationService = evaluationService ?? (database.db === undefined ? undefined : createBenchmarkEvaluationService(
       createReconciliationRunRepository(database.db),
       loadFrozenGroundTruth,
       loadFrozenPrimaryCaseAlignment,
     ));
+  app.decorate("reconciliationRunService", runService);
 
   app.get("/health", async () => ({ status: "ok" as const }));
 
@@ -158,7 +162,7 @@ export function buildApp(
     if (!parsed.success) return reply.code(400).send({ error: "invalid run request", details: parsed.error.flatten() });
     try {
       const created = await runService.createRun(parsed.data);
-      return reply.code(created.status === "PROCESSING" ? 202 : 200).send(created);
+      return reply.code(created.status === "COMPLETED" ? 200 : 202).send(created);
     } catch (error) {
       request.log.error(error, "reconciliation run failed");
       if (error instanceof CsvValidationError) {
@@ -222,6 +226,7 @@ export function buildApp(
   app.get("/api/runs/:runId/trace", traceHandler);
 
   app.addHook("onClose", async () => {
+    runService?.stopWorker?.();
     await database.close();
   });
 

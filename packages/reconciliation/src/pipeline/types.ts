@@ -9,6 +9,8 @@ import type { UsedRecordState } from "../compatibility/index.js";
 import type { ReasoningAdapterDiagnostics, ReasoningModelAdapter } from "../agent/index.js";
 import type { DeterministicRuleId } from "../deterministic/index.js";
 import type { RecordedTraceEvent } from "../trace/index.js";
+import type { CandidateSet, CandidatePrimary } from "../candidates/index.js";
+import type { ParsedBankTransaction, ParsedLedgerTransaction } from "../parsing/index.js";
 
 export type RunReconciliationInput = {
   runId: string;
@@ -80,5 +82,28 @@ export type ReconciliationRunResult = {
   runId: string;
   results: FinalReconciliationResult[];
   usedRecords: UsedRecordState;
+  trace: readonly RecordedTraceEvent[];
+};
+
+export type PlannedReasoningComponent = {
+  componentId: string;
+  caseId: string;
+  primary: CandidatePrimary;
+  candidateSet: CandidateSet;
+  decision: Extract<import("../deterministic/index.js").DeterministicDecision, { status: "NEEDS_REASONING" }>;
+  promptInput: { input: string };
+  bankRecords: ParsedBankTransaction[];
+  ledgerRecords: ParsedLedgerTransaction[];
+};
+
+export type ReconciliationPlan = {
+  runId: string;
+  asOfDate: string;
+  bankRecords: ParsedBankTransaction[];
+  ledgerRecords: ParsedLedgerTransaction[];
+  deterministicResults: FinalReconciliationResult[];
+  deterministicUsedBankRecordIds: string[];
+  deterministicUsedLedgerRecordIds: string[];
+  components: PlannedReasoningComponent[];
   trace: readonly RecordedTraceEvent[];
 };

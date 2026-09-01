@@ -1,0 +1,52 @@
+bank_txn_id,booking_date,value_date,amount,currency,direction,reference,counterparty,description,batch_id
+B9777,2026-09-17,2026-09-17,25000.00,INR,DEBIT,INV963,Acme Private Limited,Synthetic bank transaction,BATCH-001
+B9745,2026-08-28,2026-08-28,7500.00,INR,CREDIT,INV187,Orion Foods Private Limited,Synthetic bank transaction,BATCH-001
+B9785,2026-09-22,2026-09-22,17500.00,INR,DEBIT,INV475,Metro Supplies,Synthetic bank transaction,BATCH-001
+B1826,2026-08-23,2026-08-23,5000.00,INR,CREDIT,INV380,Orion Foods Private Limited,Synthetic bank transaction,BATCH-001
+B6006,2026-08-02,2026-08-02,7500.00,INR,DEBIT,INV320,Nova Retail Private Limited,Synthetic bank transaction,BATCH-001
+B4959,2026-08-05,2026-08-05,7500.00,INR,CREDIT,INV183,Metro Supplies,Synthetic bank transaction,BATCH-001
+B3214,2026-09-02,2026-09-02,20000.00,INR,CREDIT,INV383,Metro Supplies,Synthetic bank transaction,BATCH-001
+B8782,2026-09-20,2026-09-20,25000.00,INR,DEBIT,INV779,Nova Retail Private Limited,Synthetic bank transaction,BATCH-001
+B7329,2026-08-15,2026-08-15,15000.00,INR,DEBIT,INV938,Nova Retail Private Limited,Synthetic bank transaction,BATCH-001
+B4957,2026-08-11,2026-08-11,25000.00,INR,CREDIT,INV793,Acme Private Limited,Synthetic bank transaction,BATCH-001
+B5592,2026-08-24,2026-08-24,25000.00,INR,CREDIT,INV-704,Metro Supplies,Synthetic bank transaction,BATCH-001
+B9060,2026-08-17,2026-08-17,15000.00,INR,DEBIT,INV-176,Acme Private Limited,Synthetic bank transaction,BATCH-001
+B5954,2026-08-27,2026-08-27,10000.00,INR,DEBIT,INV-308,Acme Private Limited,Synthetic bank transaction,BATCH-001
+B9534,2026-08-05,2026-08-05,10000.00,INR,CREDIT,INV-584,Zenith Services,Synthetic bank transaction,BATCH-001
+B7276,2026-09-05,2026-09-05,5000.00,INR,DEBIT,INV-251,Metro Supplies,Synthetic bank transaction,BATCH-001
+B9709,2026-08-05,2026-08-05,7500.00,INR,CREDIT,,Zenith Services,Synthetic bank transaction,BATCH-001
+B6168,2026-08-28,2026-08-28,10000.00,INR,CREDIT,,Acme Private Limited,Synthetic bank transaction,BATCH-001
+B5700,2026-08-08,2026-08-08,15000.00,INR,CREDIT,,Nova Retail Private Limited,Synthetic bank transaction,BATCH-001
+B2196,2026-09-25,2026-09-25,15000.00,INR,DEBIT,,Orion Foods Private Limited,Synthetic bank transaction,BATCH-001
+B7294,2026-09-02,2026-09-02,15000.00,INR,DEBIT,,BluePeak Technologies Limited,Synthetic bank transaction,BATCH-001
+B8000,2026-09-05,2026-09-05,5000.00,INR,DEBIT,INV-272,BluePeak Technologies Holdings,Settlement for order 272,
+B1398,2026-08-31,2026-08-31,25000.00,INR,CREDIT,INV-265,METRO SUPPLIES Holdings,"NEFT METRO SUPPLIES, INV265",
+B8423,2026-09-27,2026-09-27,5000.00,INR,CREDIT,INV-237,Acme Pvt. Ltd. Holdings,"NEFT ACME PVT LTD, INV237",
+B8914,2026-08-23,2026-08-23,9950.00,INR,CREDIT,INV-133,ORION FOODS PVT LTD Holdings,"NEFT ORION FOODS PVT LTD, INV133",
+B5627,2026-09-23,2026-09-23,20000.00,INR,DEBIT,PAYMENT FOR 268,NOVA RETAIL PVT LTD Holdings,"NEFT NOVA RETAIL PVT LTD, INV268",
+B7435,2026-08-16,2026-08-16,5000.00,INR,CREDIT,INV-742,Nova Retail Pvt. Ltd. Holdings,Settlement for order 742,
+B2999,2026-08-23,2026-08-23,9950.00,INR,CREDIT,INV-629,ACME PVT LTD Holdings,"NEFT ACME PVT LTD, INV629",
+B9171,2026-08-19,2026-08-19,7500.00,INR,CREDIT,BATCH-INV190,Metro Supplies,Synthetic bank transaction,BATCH-INV190
+B3299,2026-09-27,2026-09-27,17500.00,INR,CREDIT,BATCH-INV601,Zenith Services,Synthetic bank transaction,BATCH-INV601
+B3486,2026-08-22,2026-08-22,17500.00,INR,DEBIT,BATCH-INV552,Orion Foods Private Limited,Synthetic bank transaction,BATCH-INV552
+B5253,2026-09-22,2026-09-22,7500.00,INR,DEBIT,BATCH-INV165,Nova Retail Private Limited,Synthetic bank transaction,BATCH-INV165
+B2448,2026-09-01,2026-09-01,12000.00,INR,CREDIT,BATCH-INV330-1,Metro Supplies,Synthetic bank transaction,BATCH-INV330
+B9972,2026-09-01,2026-09-01,18000.00,INR,CREDIT,BATCH-INV330-2,Metro Supplies,Synthetic bank transaction,BATCH-INV330
+B2328,2026-09-17,2026-09-17,2000.00,INR,CREDIT,BATCH-INV646-1,Nova Retail Private Limited,Synthetic bank transaction,BATCH-INV646
+B3673,2026-09-17,2026-09-17,1750.00,INR,CREDIT,BATCH-INV646-2,Nova Retail Private Limited,Synthetic bank transaction,BATCH-INV646
+B3348,2026-09-17,2026-09-17,1250.00,INR,CREDIT,BATCH-INV646-3,Nova Retail Private Limited,Synthetic bank transaction,BATCH-INV646
+B7627,2026-08-02,2026-08-02,4980.00,INR,CREDIT,BATCH-INV185-1,Nova Retail Private Limited,Synthetic bank transaction,BATCH-INV185
+B3465,2026-08-02,2026-08-02,7470.00,INR,CREDIT,BATCH-INV185-2,Nova Retail Private Limited,Synthetic bank transaction,BATCH-INV185
+B2598,2026-08-17,2026-08-17,12000.00,INR,DEBIT,BATCH-INV378-1,BluePeak Technologies Limited,Synthetic bank transaction,BATCH-INV378
+B1859,2026-08-17,2026-08-17,10500.00,INR,DEBIT,BATCH-INV378-2,BluePeak Technologies Limited,Synthetic bank transaction,BATCH-INV378
+B6755,2026-08-17,2026-08-17,7500.00,INR,DEBIT,BATCH-INV378-3,BluePeak Technologies Limited,Synthetic bank transaction,BATCH-INV378
+B8527,2026-09-28,2026-09-28,7450.00,INR,DEBIT,INV396,Acme Private Limited,Synthetic bank transaction,BATCH-001
+B4630,2026-08-20,2026-08-20,7550.00,INR,CREDIT,INV748,Nova Retail Private Limited,Synthetic bank transaction,BATCH-001
+B7687,2026-08-26,2026-08-26,19950.00,INR,CREDIT,INV550,Nova Retail Private Limited,Synthetic bank transaction,BATCH-001
+B3337,2026-09-20,2026-09-20,30050.00,INR,CREDIT,INV385,Nova Retail Private Limited,Synthetic bank transaction,BATCH-001
+B5449,2026-08-28,2026-08-28,29950.00,INR,DEBIT,INV509,Metro Supplies,Synthetic bank transaction,BATCH-001
+B8817,2026-09-04,2026-09-04,25000.00,INR,CREDIT,,Ambiguous Synthetic Entity,,BATCH-001
+B8749,2026-09-24,2026-09-24,10000.00,INR,DEBIT,,Ambiguous Synthetic Entity,,BATCH-001
+B9642,2026-09-01,2026-09-01,25000.00,INR,CREDIT,,Ambiguous Synthetic Entity,,BATCH-001
+B5171,2026-09-25,2026-09-25,12450.00,INR,DEBIT,XYZ991,,,
+B8237,2026-08-12,2026-08-12,25000.00,INR,DEBIT,XYZ991,,,

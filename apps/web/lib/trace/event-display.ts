@@ -23,6 +23,18 @@ export const TRACE_EVENT_META: Record<TraceEventType, TraceEventMeta> = {
   VERIFICATION_CHECKED: { label: "Verification checked", stage: "Verifier", stageClassName: "bg-tally-surface-subtle text-tally-ink-secondary" },
   CASE_FINALIZED: { label: "Case finalized", stage: "Outcome", stageClassName: "bg-tally-surface-subtle text-tally-ink-secondary" },
   RUN_COMPLETED: { label: "Run completed", stage: "Run", stageClassName: "bg-tally-success-soft text-tally-success" },
+  RUN_PLANNED: { label: "Run planned", stage: "Run", stageClassName: "bg-tally-accent-soft text-tally-accent" },
+  WORK_ITEM_CREATED: { label: "Work item created", stage: "Run", stageClassName: "bg-tally-surface-subtle text-tally-ink-secondary" },
+  WORK_ITEM_CLAIMED: { label: "Work item claimed", stage: "Run", stageClassName: "bg-tally-warning-soft text-tally-warning" },
+  WORK_ITEM_RELEASED: { label: "Work item released", stage: "Run", stageClassName: "bg-tally-surface-subtle text-tally-ink-secondary" },
+  WORK_ITEM_COMPLETED: { label: "Work item completed", stage: "Outcome", stageClassName: "bg-tally-success-soft text-tally-success" },
+  WORK_ITEM_FAILED: { label: "Work item failed", stage: "Outcome", stageClassName: "bg-tally-danger-soft text-tally-danger" },
+  WORK_ITEM_CANCELLED: { label: "Work item cancelled", stage: "Outcome", stageClassName: "bg-tally-warning-soft text-tally-warning" },
+  REASONING_BATCH_STARTED: { label: "Reasoning batch started", stage: "Agent", stageClassName: "bg-tally-accent-soft text-tally-accent" },
+  REASONING_BATCH_COMPLETED: { label: "Reasoning batch completed", stage: "Agent", stageClassName: "bg-tally-success-soft text-tally-success" },
+  REPAIR_STARTED: { label: "Verifier repair started", stage: "Agent", stageClassName: "bg-tally-warning-soft text-tally-warning" },
+  WORKER_SLICE_YIELDED: { label: "Worker slice yielded", stage: "Run", stageClassName: "bg-tally-warning-soft text-tally-warning" },
+  RUN_CANCELLED: { label: "Run cancelled", stage: "Run", stageClassName: "bg-tally-warning-soft text-tally-warning" },
 };
 
 const ruleLabels: Record<string, string> = {
@@ -117,6 +129,30 @@ export function eventSummary(event: TraceEvent): string {
     }
     case "CASE_FINALIZED":
       return `${readableCode(stringValue(payload, "outcome") ?? "outcome not recorded")} · ${readableCode(stringValue(payload, "reasonCode") ?? "reason not recorded")}`;
+    case "RUN_PLANNED":
+      return `${numberValue(payload, "totalWorkItems") ?? 0} durable work item${numberValue(payload, "totalWorkItems") === 1 ? "" : "s"} planned`;
+    case "WORK_ITEM_CREATED":
+      return `Work item ${stringValue(payload, "workItemId") ?? "not recorded"} created`;
+    case "WORK_ITEM_CLAIMED":
+      return `Work item ${stringValue(payload, "workItemId") ?? "not recorded"} claimed`;
+    case "WORK_ITEM_RELEASED":
+      return `Work item released${stringValue(payload, "reason") ? ` · ${readableCode(stringValue(payload, "reason")!)}` : ""}`;
+    case "WORK_ITEM_COMPLETED":
+      return `Work item completed${numberValue(payload, "durationMs") !== undefined ? ` · ${numberValue(payload, "durationMs")} ms` : ""}`;
+    case "WORK_ITEM_FAILED":
+      return `Work item failed${stringValue(payload, "classification") ? ` · ${readableCode(stringValue(payload, "classification")!)}` : ""}`;
+    case "WORK_ITEM_CANCELLED":
+      return "Remaining work item cancelled";
+    case "REASONING_BATCH_STARTED":
+      return `Reasoning batch started with ${numberValue(payload, "batchSize") ?? 0} component${numberValue(payload, "batchSize") === 1 ? "" : "s"}`;
+    case "REASONING_BATCH_COMPLETED":
+      return `Reasoning batch completed${numberValue(payload, "durationMs") !== undefined ? ` · ${numberValue(payload, "durationMs")} ms` : ""}`;
+    case "REPAIR_STARTED":
+      return `Targeted verifier repair started${numberValue(payload, "repairAttempt") !== undefined ? ` · attempt ${numberValue(payload, "repairAttempt")}` : ""}`;
+    case "WORKER_SLICE_YIELDED":
+      return "Worker time slice yielded; leased work will resume";
+    case "RUN_CANCELLED":
+      return "Run cancelled; persisted results remain available";
   }
 }
 

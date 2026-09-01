@@ -153,13 +153,17 @@ export type {
   TraceRecorderOptions,
 } from "./src/trace/index.js";
 
-export { DEFAULT_REASONING_CONCURRENCY, ReconciliationOperationalError, runReconciliation } from "./src/pipeline/index.js";
+export { DEFAULT_REASONING_CONCURRENCY, ReconciliationOperationalError, planReconciliation, processPlannedBatch, processPlannedComponent, runReconciliation } from "./src/pipeline/index.js";
+export { partitionReasoningComponents } from "./src/pipeline/job-planner.js";
 export type {
   FinalReconciliationResult,
+  PlannedReasoningComponent,
+  ReconciliationPlan,
   ReconciliationOperationalErrorCode,
   ReconciliationRunResult,
   RunReconciliationInput,
 } from "./src/pipeline/index.js";
+export type { ReasoningComponent } from "./src/pipeline/job-planner.js";
 
 export type {
   CsvSource,

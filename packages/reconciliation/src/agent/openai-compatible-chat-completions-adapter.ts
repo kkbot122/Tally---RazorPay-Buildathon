@@ -34,6 +34,7 @@ export type OpenAICompatibleChatCompletionsAdapterOptions = {
   reasoningEffort?: "none" | "high" | "max";
   timeout?: number;
   maxRetries?: number;
+  maxCompletionTokens?: number;
   client?: ChatCompletionsClient;
   /** Required in production: its state store coordinates all API replicas. */
   groqRateLimiter?: GroqRateLimiter;
@@ -45,11 +46,13 @@ export class OpenAICompatibleChatCompletionsAdapter implements ReasoningModelAda
   private readonly reasoningEffort: "none" | "high" | "max";
   private readonly client: ChatCompletionsClient;
   private readonly groqRateLimiter: GroqRateLimiter | undefined;
+  private readonly maxCompletionTokens: number;
 
   constructor(options: OpenAICompatibleChatCompletionsAdapterOptions = {}) {
     this.provider = options.provider ?? "groq";
     this.model = options.model ?? (this.provider === "nvidia" ? DEFAULT_NVIDIA_REASONING_MODEL : DEFAULT_GROQ_REASONING_MODEL);
     this.reasoningEffort = options.reasoningEffort ?? "none";
+    this.maxCompletionTokens = options.maxCompletionTokens ?? (this.provider === "groq" ? MAX_GROQ_REASONING_COMPLETION_TOKENS : MAX_NVIDIA_REASONING_COMPLETION_TOKENS);
     this.client = options.client ?? new OpenAI({
       apiKey: options.apiKey,
       baseURL: options.baseURL ?? (this.provider === "nvidia" ? NVIDIA_BASE_URL : GROQ_BASE_URL),
@@ -83,8 +86,8 @@ export class OpenAICompatibleChatCompletionsAdapter implements ReasoningModelAda
           // Groq uses a deliberately bounded output reservation. NVIDIA retains
           // its established budget because it is not part of Groq's quota.
           ...(this.provider === "groq"
-            ? { max_completion_tokens: MAX_GROQ_REASONING_COMPLETION_TOKENS }
-            : { max_tokens: MAX_NVIDIA_REASONING_COMPLETION_TOKENS }),
+            ? { max_completion_tokens: this.maxCompletionTokens }
+            : { max_tokens: this.maxCompletionTokens }),
           ...(this.provider === "nvidia" && this.model.startsWith("nvidia/nemotron-3.5-lightning")
             ? { chat_template_kwargs: { enable_thinking: this.reasoningEffort !== "none" } }
             : {}),
@@ -143,7 +146,37 @@ export class OpenAICompatibleChatCompletionsAdapter implements ReasoningModelAda
       return parseProposal(await requestProposal(`${input.input}\n\nYour previous JSON was rejected. Return a corrected JSON object only. Fix these schema errors exactly: ${cause}`));
     }
   }
+
+  async generateBatchProposal(input: { items: readonly (ReasoningModelInput & { componentId: string })[]; signal?: AbortSignal }): Promise<unknown> {
+    if (input.items.length < 1 || input.items.length > 5) throw new ReasoningAdapterError("AI_SCHEMA_ERROR", "The reasoning batch must contain between one and five components.");
+    const instruction = `${RECONCILIATION_BATCH_INSTRUCTIONS}\n\n${input.items.map((item) => `COMPONENT ${item.componentId}:\n${item.input}`).join("\n\n")}`;
+    const startedAt = Date.now();
+    try {
+      const reservation = this.provider === "groq" ? await this.groqRateLimiter!.reserve(estimateRequestTokens(instruction, undefined), input.signal) : undefined;
+      const request = {
+        model: this.model,
+        messages: [{ role: "system", content: `${PROPOSAL_FORMAT}\nReturn a JSON array of objects shaped { componentId, proposal }.` }, { role: "user", content: instruction }],
+        response_format: { type: "json_object" }, temperature: 0,
+        ...(this.provider === "groq" ? { max_completion_tokens: this.maxCompletionTokens } : { max_tokens: this.maxCompletionTokens }),
+      };
+      const response = await this.client.create(request as never, { signal: input.signal });
+      if (reservation !== undefined) await this.groqRateLimiter!.settle(reservation, actualTokenUsage(response));
+      const content = "choices" in response && response.choices.length > 0 ? response.choices[0]?.message?.content : undefined;
+      if (typeof content !== "string") throw new ReasoningAdapterError("AI_SCHEMA_ERROR", `The ${this.provider} batch response did not contain JSON.`);
+      try {
+        const parsed: unknown = JSON.parse(content);
+        return Array.isArray(parsed) ? parsed : (parsed as { proposals?: unknown }).proposals;
+      } catch (error) {
+        throw new ReasoningAdapterError("AI_SCHEMA_ERROR", `The ${this.provider} batch response was not valid JSON.`, { cause: error });
+      }
+    } catch (error) {
+      if (error instanceof ReasoningAdapterError) throw error;
+      throw new ReasoningAdapterError("AI_REQUEST_ERROR", `The ${this.provider} reasoning batch failed.`, { cause: error, diagnostics: { provider: this.provider, model: this.model, durationMs: Date.now() - startedAt, ...classifyProviderError(error), ...safeProviderErrorDetails(error) } });
+    }
+  }
 }
+
+const RECONCILIATION_BATCH_INSTRUCTIONS = "Analyze each independent component separately. Return exactly one proposal for every supplied componentId. Never use records or evidence from another component. A malformed, missing, duplicate, or cross-component proposal invalidates the entire batch response; the caller will verify each valid proposal independently.";
 
 function retryAfterMs(error: unknown): number {
   const retryAfter = header(error, "retry-after");

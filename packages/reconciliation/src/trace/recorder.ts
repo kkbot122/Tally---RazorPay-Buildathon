@@ -88,9 +88,21 @@ export type TraceEventPayload = {
       verificationFailures: Record<string, number>;
     };
   };
+  RUN_PLANNED: { totalWorkItems?: number; deterministicResults?: number; reasoningComponents?: number };
+  WORK_ITEM_CREATED: { workItemId?: string; sequenceNo?: number; caseIds?: string[]; batchSize?: number };
+  WORK_ITEM_CLAIMED: { workItemId?: string; owner?: string; attemptCount?: number; leaseExpiresAt?: string };
+  WORK_ITEM_RELEASED: { workItemId?: string; reason?: string };
+  WORK_ITEM_COMPLETED: { workItemId?: string; durationMs?: number };
+  WORK_ITEM_FAILED: { workItemId?: string; classification?: string; attemptCount?: number };
+  WORK_ITEM_CANCELLED: { workItemId?: string };
+  REASONING_BATCH_STARTED: { workItemIds?: string[]; batchSize?: number; quotaWaitMs?: number };
+  REASONING_BATCH_COMPLETED: { workItemIds?: string[]; batchSize?: number; durationMs?: number };
+  REPAIR_STARTED: { workItemId?: string; caseId?: string; repairAttempt?: number };
+  WORKER_SLICE_YIELDED: { workerId?: string; durationMs?: number; releasedWorkItems?: number };
+  RUN_CANCELLED: { completedResults?: number; cancelledWorkItems?: number };
 };
 
-export type RunScopedTraceEventType = "RUN_STARTED" | "RUN_FAILED" | "RUN_COMPLETED";
+export type RunScopedTraceEventType = "RUN_STARTED" | "RUN_FAILED" | "RUN_COMPLETED" | "RUN_PLANNED" | "WORK_ITEM_CREATED" | "WORK_ITEM_CLAIMED" | "WORK_ITEM_RELEASED" | "WORK_ITEM_COMPLETED" | "WORK_ITEM_FAILED" | "WORK_ITEM_CANCELLED" | "REASONING_BATCH_STARTED" | "REASONING_BATCH_COMPLETED" | "REPAIR_STARTED" | "WORKER_SLICE_YIELDED" | "RUN_CANCELLED";
 export type CaseScopedTraceEventType = Exclude<TraceEventType, RunScopedTraceEventType>;
 
 export type TraceRecordInput<T extends TraceEventType = TraceEventType> = T extends RunScopedTraceEventType
@@ -156,7 +168,7 @@ export function createTraceRecorder(options: TraceRecorderOptions): TraceRecorde
   return {
     record<T extends TraceEventType>(input: TraceRecordInput<T>): RecordedTraceEvent<T> {
       const eventType = input.type as TraceEventType;
-      const isCaseScoped = !["RUN_STARTED", "RUN_FAILED", "RUN_COMPLETED"].includes(eventType);
+      const isCaseScoped = !["RUN_STARTED", "RUN_FAILED", "RUN_COMPLETED", "RUN_PLANNED", "WORK_ITEM_CREATED", "WORK_ITEM_CLAIMED", "WORK_ITEM_RELEASED", "WORK_ITEM_COMPLETED", "WORK_ITEM_FAILED", "WORK_ITEM_CANCELLED", "REASONING_BATCH_STARTED", "REASONING_BATCH_COMPLETED", "REPAIR_STARTED", "WORKER_SLICE_YIELDED", "RUN_CANCELLED"].includes(eventType);
       if (isCaseScoped && (typeof input.caseId !== "string" || input.caseId.trim().length === 0)) {
         throw new Error(`${eventType} requires a non-empty caseId`);
       }
