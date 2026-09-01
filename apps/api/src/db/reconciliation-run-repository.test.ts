@@ -144,4 +144,17 @@ describe("durable work-item claims", () => {
     expect(query.sql).toContain("WHERE TRUE");
     expect(query.params).not.toContain(undefined);
   });
+
+  it("binds the claim lease expiry as a timestamp string", async () => {
+    const execute = vi.fn(async (_query: unknown) => []);
+    const repository = createReconciliationRunRepository({ execute } as never);
+
+    await repository.claimWorkItem!({ owner: "worker", leaseMs: 60_000 });
+
+    const query = new PgDialect().sqlToQuery(execute.mock.calls[0]![0] as SQL);
+    expect(query.params).toEqual(expect.arrayContaining([
+      expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/),
+    ]));
+    expect(query.params.some((parameter) => parameter instanceof Date)).toBe(false);
+  });
 });

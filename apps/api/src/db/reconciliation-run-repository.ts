@@ -215,7 +215,10 @@ export function createReconciliationRunRepository(db: DatabaseClient): Reconcili
     },
     async claimWorkItem({ runId, owner, leaseMs }) {
       if (!Number.isInteger(leaseMs) || leaseMs < 1) throw new Error("leaseMs must be a positive integer");
-      const expiry = new Date(Date.now() + leaseMs);
+      // This statement is sent directly through postgres.js. Unlike Drizzle's
+      // column mapper, its raw template binding does not accept Date values in
+      // this runtime, so bind an explicit timestamp string.
+      const expiry = new Date(Date.now() + leaseMs).toISOString();
       // The postgres driver renders an undefined interpolation as an empty SQL
       // fragment. The normal worker loop has no runId filter, so use TRUE
       // instead of interpolating that undefined value.
