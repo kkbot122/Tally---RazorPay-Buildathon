@@ -58,9 +58,14 @@ export class GroqReasoningAdapter implements ReasoningModelAdapter {
   async generateProposal(input: ReasoningModelInput): Promise<AgentProposal> {
     const requestProposal = async (instruction: string) => {
       const startedAt = Date.now();
+      let providerRequestStarted = false;
       try {
+        await input.onOperationalEvent?.("GROQ_QUOTA_WAIT_STARTED");
         const reservation = await this.groqRateLimiter!.reserve(estimateRequestTokens(instruction, input.retryFeedback), input.signal);
+        await input.onOperationalEvent?.("GROQ_QUOTA_RESERVED", { quotaWaitMs: Date.now() - startedAt });
         input.onProviderRequestStart?.();
+        await input.onOperationalEvent?.("PROVIDER_REQUEST_STARTED");
+        providerRequestStarted = true;
         const request = {
           model: this.model,
           messages: [
@@ -73,8 +78,11 @@ export class GroqReasoningAdapter implements ReasoningModelAdapter {
         };
         const response = await this.client.create(request as never, { signal: input.signal });
         await this.groqRateLimiter!.settle(reservation, actualTokenUsage(response));
+        await input.onOperationalEvent?.("PROVIDER_REQUEST_COMPLETED", { durationMs: Date.now() - startedAt });
+        providerRequestStarted = false;
         return response;
       } catch (error) {
+        if (providerRequestStarted) await input.onOperationalEvent?.("PROVIDER_REQUEST_COMPLETED", { durationMs: Date.now() - startedAt, outcome: "FAILED" });
         const classified = classifyProviderError(error);
         throw new ReasoningAdapterError("AI_REQUEST_ERROR", "The Groq reasoning request failed.", {
           cause: error,

@@ -1,6 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
 import { planReconciliation } from "@tally/reconciliation";
+import { buildDevFixture } from "@tally/benchmark";
 
 import { createDatabase } from "./client.js";
 import {
@@ -185,7 +186,22 @@ describeDatabase("PostgreSQL reconciliation persistence", () => {
     await expect(repository.getRunById(runId)).resolves.toMatchObject({ status: "PROCESSING", pendingWorkItems: 1 });
     const claimed = await repository.claimWorkItem!({ runId, owner: "test-worker", leaseMs: 60_000 });
     expect(claimed).toMatchObject({ runId, status: "LEASED" });
+    expect(claimed?.caseIds).toHaveLength(1);
+    expect(claimed?.componentSnapshot).toMatchObject({ componentId: expect.any(String) });
     expect(await repository.completeWorkItem!(claimed!.workItemId, "test-worker")).toBe(true);
     await expect(repository.getRunById(runId)).resolves.toMatchObject({ completedWorkItems: 1, pendingWorkItems: 0 });
+  });
+
+  it("persists the six frozen-dev AI escalations as six investigations", async () => {
+    const runId = testRunId("dev-investigations");
+    runIds.push(runId);
+    const fixture = buildDevFixture();
+    await repository.startRun({ runId, asOfDate: fixture.asOfDate, bankCsv: fixture.bankCsv, ledgerCsv: fixture.ledgerCsv });
+
+    const plan = planReconciliation({ runId, asOfDate: fixture.asOfDate, bankCsv: fixture.bankCsv, ledgerCsv: fixture.ledgerCsv });
+    expect(plan.components).toHaveLength(6);
+    await repository.persistPlan!(plan);
+
+    await expect(repository.getRunById(runId)).resolves.toMatchObject({ totalWorkItems: 6, pendingWorkItems: 6 });
   });
 });

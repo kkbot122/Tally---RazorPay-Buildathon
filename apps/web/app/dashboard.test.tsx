@@ -76,6 +76,7 @@ describe("T030 dashboard workflows", () => {
     await waitFor(() => expect(screen.getByText("PROCESSING")).toBeTruthy());
     expect(screen.getByRole("button", { name: "Stop run" })).toBeTruthy();
     expect(screen.getByText("1 of 1 persisted results")).toBeTruthy();
+    expect(screen.getByText("AI investigations complete: 0 / 2")).toBeTruthy();
     expect(api.createRun).not.toHaveBeenCalled();
   });
 

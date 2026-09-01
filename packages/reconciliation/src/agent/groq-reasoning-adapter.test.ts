@@ -117,4 +117,22 @@ describe("GroqReasoningAdapter", () => {
     expect(reserve.mock.invocationCallOrder[0]).toBeLessThan(onProviderRequestStart.mock.invocationCallOrder[0]!);
     expect(onProviderRequestStart.mock.invocationCallOrder[0]).toBeLessThan(create.mock.invocationCallOrder[0]!);
   });
+
+  it("emits quota and provider boundaries in order without reasoning content", async () => {
+    const events: Array<{ type: string; metadata?: Record<string, unknown> }> = [];
+    const adapter = new GroqReasoningAdapter({
+      client: { create: vi.fn().mockResolvedValue({ choices: [{ message: { content: JSON.stringify(proposal) } }] }) } as never,
+      groqRateLimiter: { reserve: vi.fn(async () => ({ reservationId: "r", requests: 1, tokens: 100 })), settle: vi.fn(), blockFor: vi.fn() } as never,
+    });
+
+    await adapter.generateProposal({ input: "private prompt", onOperationalEvent: (type, metadata) => { events.push({ type, metadata }); } });
+
+    expect(events.map((event) => event.type)).toEqual([
+      "GROQ_QUOTA_WAIT_STARTED",
+      "GROQ_QUOTA_RESERVED",
+      "PROVIDER_REQUEST_STARTED",
+      "PROVIDER_REQUEST_COMPLETED",
+    ]);
+    expect(JSON.stringify(events)).not.toContain("private prompt");
+  });
 });

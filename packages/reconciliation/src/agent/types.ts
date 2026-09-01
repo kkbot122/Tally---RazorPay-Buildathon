@@ -9,6 +9,8 @@ export type ReasoningModelInput = {
   signal?: AbortSignal;
   /** Called after any capacity wait and immediately before a provider request. */
   onProviderRequestStart?: () => void;
+  /** Emits operational request boundaries only; never model reasoning content. */
+  onOperationalEvent?: (event: "GROQ_QUOTA_WAIT_STARTED" | "GROQ_QUOTA_RESERVED" | "PROVIDER_REQUEST_STARTED" | "PROVIDER_REQUEST_COMPLETED", metadata?: Record<string, unknown>) => void | Promise<void>;
 };
 
 export interface ReasoningModelAdapter {

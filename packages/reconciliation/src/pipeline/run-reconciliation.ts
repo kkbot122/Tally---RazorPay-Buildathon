@@ -1,6 +1,6 @@
 import type { AgentProposal, FinalOutcome, ReasonCode } from "@tally/contracts";
 
-import { buildReconciliationReasoningInput, ReasoningAdapterError, type ReasoningPrimary } from "../agent/index.js";
+import { buildReconciliationReasoningInput, ReasoningAdapterError, type ReasoningModelInput, type ReasoningPrimary } from "../agent/index.js";
 import type { CandidatePrimary, CandidateSet } from "../candidates/index.js";
 import { generateCandidates } from "../candidates/index.js";
 import { createRecordLookup, emptyUsedRecordState, type RecordLookup, type UsedRecordState } from "../compatibility/index.js";
@@ -426,14 +426,14 @@ export function planReconciliation(input: Pick<RunReconciliationInput, "runId" |
 }
 
 export async function processPlannedComponent(
-  input: { runId: string; asOfDate: string; component: PlannedReasoningComponent; modelAdapter: RunReconciliationInput["modelAdapter"]; usedRecords?: { bankRecordIds: Set<string>; ledgerRecordIds: Set<string> }; signal?: AbortSignal; onProviderRequestStart?: () => void },
+  input: { runId: string; asOfDate: string; component: PlannedReasoningComponent; modelAdapter: RunReconciliationInput["modelAdapter"]; usedRecords?: { bankRecordIds: Set<string>; ledgerRecordIds: Set<string> }; signal?: AbortSignal; onProviderRequestStart?: () => void; onOperationalEvent?: ReasoningModelInput["onOperationalEvent"] },
 ): Promise<{ result: FinalReconciliationResult; trace: readonly RecordedTraceEvent[] }> {
   const records = createRecordLookup(input.component.bankRecords, input.component.ledgerRecords);
   const item: PreparedReasoningItem = { ...input.component, coverComponentOnUnresolved: true };
   const trace = createTraceRecorder({ runId: `${input.runId}:component:${input.component.componentId}` });
   trace.record({ type: "AGENT_STARTED", caseId: input.component.caseId, payload: { primarySide: input.component.primary.side, primaryRecordId: input.component.primary.recordId, candidateCount: input.component.candidateSet.candidates.length, escalationReason: input.component.decision.reason } });
   const usedRecords = input.usedRecords ?? cloneUsedRecords(emptyUsedRecordState());
-  const proposal = await generateProposalWithVerifierRetry(item, input.modelAdapter.generateProposal.bind(input.modelAdapter), records, input.asOfDate, cloneUsedRecords(usedRecords), trace, input.signal, undefined, input.onProviderRequestStart);
+  const proposal = await generateProposalWithVerifierRetry(item, input.modelAdapter.generateProposal.bind(input.modelAdapter), records, input.asOfDate, cloneUsedRecords(usedRecords), trace, input.signal, undefined, input.onProviderRequestStart, input.onOperationalEvent);
   const results: FinalReconciliationResult[] = [];
   finalizeAgentProposal(item, proposal, records, input.runId, input.asOfDate, usedRecords, new Set(), results, trace);
   return { result: results[0]!, trace: trace.getEvents() };
@@ -572,8 +572,9 @@ async function generateProposalWithVerifierRetry(
   signal?: AbortSignal,
   onRepair?: () => void,
   onProviderRequestStart?: () => void,
+  onOperationalEvent?: ReasoningModelInput["onOperationalEvent"],
 ): Promise<AgentProposal> {
-  let proposal = await requestProposal({ ...item.promptInput, signal, onProviderRequestStart });
+  let proposal = await requestProposal({ ...item.promptInput, signal, onProviderRequestStart, onOperationalEvent });
   trace.record({ type: "AGENT_PROPOSED", caseId: item.caseId, payload: proposal });
 
   for (let attempt = 0; attempt < 1; attempt += 1) {
@@ -592,6 +593,7 @@ async function generateProposalWithVerifierRetry(
       retryFeedback: JSON.stringify({ caseId: item.caseId, proposedBankRecordIds: proposal.bankRecordIds, proposedLedgerRecordIds: proposal.ledgerRecordIds, verifierFailures: feedback }),
       signal,
       onProviderRequestStart,
+      onOperationalEvent,
     });
     trace.record({ type: "AGENT_PROPOSED", caseId: item.caseId, payload: proposal });
   }

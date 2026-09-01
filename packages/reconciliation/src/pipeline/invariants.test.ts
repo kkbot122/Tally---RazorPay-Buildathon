@@ -5,7 +5,7 @@ import { createRecordLookup, emptyUsedRecordState } from "../compatibility/index
 import type { CandidateSet } from "../candidates/index.js";
 import type { ParsedBankTransaction, ParsedLedgerTransaction } from "../parsing/types.js";
 import { verifyMatchProposal } from "../verifier/index.js";
-import { planReconciliation, processPlannedBatch, runReconciliation } from "./run-reconciliation.js";
+import { planReconciliation, processPlannedBatch, processPlannedComponent, runReconciliation } from "./run-reconciliation.js";
 import { ReconciliationOperationalError } from "./types.js";
 import { ReasoningAdapterError, type ReasoningModelAdapter } from "../agent/index.js";
 
@@ -266,6 +266,28 @@ describe("T034 core engine safety invariants", () => {
 
     expect(batchCalls).toBe(0);
     expect(individualCalls).toBe(plan.components.length);
+  });
+
+  it("bounds one investigation to one initial request and one verifier repair", async () => {
+    const plan = planReconciliation({
+      runId: "run-bounded-repair",
+      asOfDate: "2026-08-23",
+      bankCsv: bankCsv([{ id: "B1", reference: "BANK-1", counterparty: "Bank One" }]),
+      ledgerCsv: ledgerCsv([{ id: "L1", reference: "LEDGER-1", counterparty: "Ledger One" }]),
+    });
+    let calls = 0;
+    const modelAdapter: ReasoningModelAdapter = {
+      generateProposal: async () => {
+        calls += 1;
+        return proposalFor("B1", calls === 1 ? ["UNKNOWN"] : ["L1"]);
+      },
+    };
+
+    const processed = await processPlannedComponent({ runId: plan.runId, asOfDate: plan.asOfDate, component: plan.components[0]!, modelAdapter });
+
+    expect(calls).toBe(2);
+    expect(processed.trace.filter((event) => event.type === "REPAIR_STARTED")).toHaveLength(1);
+    expect(processed.result.caseId).toBe(plan.components[0]!.caseId);
   });
 
   it("rejects reconciliation when currencies differ", async () => {

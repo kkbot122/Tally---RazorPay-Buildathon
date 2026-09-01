@@ -12,7 +12,7 @@ import {
   verificationResults,
 } from "./schema.js";
 import type { DatabaseClient } from "./client.js";
-import { partitionReasoningComponents, type ReconciliationPlan } from "@tally/reconciliation";
+import type { ReconciliationPlan } from "@tally/reconciliation";
 
 export type PersistedFinalResult = {
   caseId: string;
@@ -303,8 +303,8 @@ export function createReconciliationRunRepository(db: DatabaseClient): Reconcili
       `) as unknown as Array<{ run_id: string }>;
       return rows.map((row) => row.run_id);
     },
-    async persistPlan(plan, options) {
-      const batches = partitionReasoningComponents(plan.components.map((component) => ({
+    async persistPlan(plan) {
+      const investigations = plan.components.map((component) => ({
         ...component,
         candidateCount: component.candidateSet.candidates.length,
         bankRecordIds: [
@@ -318,19 +318,19 @@ export function createReconciliationRunRepository(db: DatabaseClient): Reconcili
           ...component.candidateSet.candidates.filter((candidate) => candidate.side === "LEDGER").map((candidate) => candidate.recordId),
         ],
         snapshot: component, candidateSnapshot: component.candidateSet,
-      })), { maxItemsPerBatch: options?.maxItemsPerBatch ?? 3, maxCandidates: 12 });
+      }));
       await db.transaction(async (tx) => {
-        const updated = await tx.update(reconciliationRuns).set({ status: "PROCESSING", startedAt: new Date(plan.trace[0]?.occurredAt ?? Date.now()), totalBankRecords: plan.bankRecords.length, totalLedgerRecords: plan.ledgerRecords.length, totalWorkItems: batches.length, configuration: { asOfDate: plan.asOfDate, planned: true } }).where(sql`${reconciliationRuns.runId} = ${plan.runId} AND ${reconciliationRuns.status} IN ('PENDING', 'PROCESSING')`).returning({ runId: reconciliationRuns.runId });
+        const updated = await tx.update(reconciliationRuns).set({ status: "PROCESSING", startedAt: new Date(plan.trace[0]?.occurredAt ?? Date.now()), totalBankRecords: plan.bankRecords.length, totalLedgerRecords: plan.ledgerRecords.length, totalWorkItems: investigations.length, configuration: { asOfDate: plan.asOfDate, planned: true } }).where(sql`${reconciliationRuns.runId} = ${plan.runId} AND ${reconciliationRuns.status} IN ('PENDING', 'PROCESSING')`).returning({ runId: reconciliationRuns.runId });
         if (updated.length === 0) return;
         if (plan.deterministicResults.length > 0) {
           await tx.insert(reconciliationResults).values(plan.deterministicResults.map((result, index) => mapResultRow(plan.runId, result, index, new Map(), new Map()))).onConflictDoNothing();
         }
         if (plan.trace.length > 0) await tx.insert(traceEvents).values(plan.trace.map((event) => ({ eventId: event.eventId, runId: event.runId, sequenceNo: event.sequenceNo, caseId: event.caseId, type: event.type, occurredAt: new Date(event.occurredAt), message: event.message, metadata: event.payload }))).onConflictDoNothing();
-        if (batches.length > 0) await tx.insert(reconciliationWorkItems).values(batches.map((batch, index) => ({
+        if (investigations.length > 0) await tx.insert(reconciliationWorkItems).values(investigations.map((component, index) => ({
           workItemId: `${plan.runId}:work:${index + 1}`, runId: plan.runId, sequenceNo: index + 1,
-          caseIds: batch.map((component) => component.caseId),
-          componentSnapshot: { components: batch.map((component) => component.snapshot) },
-          candidateSnapshot: { components: batch.map((component) => component.candidateSnapshot) },
+          caseIds: [component.caseId],
+          componentSnapshot: component.snapshot,
+          candidateSnapshot: component.candidateSnapshot,
         }))).onConflictDoNothing();
         await refreshRunWorkProgress(tx, plan.runId);
       });

@@ -9,10 +9,8 @@ export type ReconciliationJobWorkerOptions = {
   concurrency?: number;
   leaseMs?: number;
   sliceMs?: number;
-  /** Start the bounded execution slice only after provider quota capacity is reserved. */
-  deferSliceUntilProviderRequest?: boolean;
   pollIntervalMs?: number;
-  onEvent?: (event: { type: "claimed" | "completed" | "failed" | "released" | "slice_yielded"; workItemId?: string; runId?: string; durationMs?: number; classification?: string }) => void;
+  onEvent?: (event: { type: "claimed" | "completed" | "failed" | "released" | "slice_yielded"; workItemId?: string; runId?: string; durationMs?: number; classification?: string }) => void | Promise<void>;
 };
 
 /**
@@ -40,40 +38,37 @@ export function createReconciliationJobWorker(options: ReconciliationJobWorkerOp
     const runControllers = controllers.get(item.runId) ?? new Set<AbortController>();
     runControllers.add(controller);
     controllers.set(item.runId, runControllers);
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const startProviderRequest = () => {
-      timer ??= setTimeout(() => controller.abort("WORKER_SLICE_EXPIRED"), sliceMs);
-    };
-    if (options.deferSliceUntilProviderRequest !== true) startProviderRequest();
+    const timer = setTimeout(() => controller.abort("WORKER_SLICE_EXPIRED"), sliceMs);
+    const startProviderRequest = () => {};
     const renewal = setInterval(() => {
       void repository.isRunCancelled?.(item.runId).then((cancelled) => {
         if (cancelled) controller.abort("RUN_CANCELLED");
       });
       void repository.renewWorkItem?.(item.workItemId, owner, leaseMs);
     }, Math.max(1_000, Math.floor(leaseMs / 2)));
-    options.onEvent?.({ type: "claimed", workItemId: item.workItemId, runId: item.runId });
     try {
+      await abortable(Promise.resolve(options.onEvent?.({ type: "claimed", workItemId: item.workItemId, runId: item.runId })).then(() => {}), controller.signal);
       // A provider client can occasionally leave a socket promise pending even
       // after receiving an AbortSignal. The worker lease must still end at the
       // slice boundary so another attempt can make progress.
       await abortable(options.processWorkItem(item, controller.signal, { startProviderRequest }), controller.signal);
       if (controller.signal.aborted) {
         await repository.releaseWorkItem!(item.workItemId, owner, "WORKER_SLICE_EXPIRED");
-        options.onEvent?.({ type: "slice_yielded", workItemId: item.workItemId, runId: item.runId, durationMs: Date.now() - started });
+        await options.onEvent?.({ type: "slice_yielded", workItemId: item.workItemId, runId: item.runId, durationMs: Date.now() - started });
       } else if (await repository.completeWorkItem!(item.workItemId, owner)) {
-        options.onEvent?.({ type: "completed", workItemId: item.workItemId, runId: item.runId, durationMs: Date.now() - started });
+        await options.onEvent?.({ type: "completed", workItemId: item.workItemId, runId: item.runId, durationMs: Date.now() - started });
       }
     } catch (error) {
       if (controller.signal.aborted) {
         await repository.releaseWorkItem!(item.workItemId, owner, "WORKER_SLICE_EXPIRED");
-        options.onEvent?.({ type: "slice_yielded", workItemId: item.workItemId, runId: item.runId, durationMs: Date.now() - started });
+        await options.onEvent?.({ type: "slice_yielded", workItemId: item.workItemId, runId: item.runId, durationMs: Date.now() - started });
       } else {
         const classification = error instanceof Error ? error.name : "UNKNOWN";
         await repository.failWorkItem!(item.workItemId, owner, classification);
-        options.onEvent?.({ type: "failed", workItemId: item.workItemId, runId: item.runId, durationMs: Date.now() - started, classification });
+        await options.onEvent?.({ type: "failed", workItemId: item.workItemId, runId: item.runId, durationMs: Date.now() - started, classification });
       }
     } finally {
-      if (timer !== undefined) clearTimeout(timer);
+      clearTimeout(timer);
       clearInterval(renewal);
       runControllers.delete(controller);
       if (runControllers.size === 0) controllers.delete(item.runId);

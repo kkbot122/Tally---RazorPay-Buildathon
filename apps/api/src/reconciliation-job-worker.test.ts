@@ -47,31 +47,27 @@ describe("reconciliation job worker", () => {
     expect(repo.releaseWorkItem).toHaveBeenCalledWith("run:work:1", "worker", "WORKER_SLICE_EXPIRED");
   });
 
-  it("does not spend the provider execution slice while waiting for quota capacity", async () => {
+  it("bounds quota waiting from the moment a work item is claimed", async () => {
     vi.useFakeTimers();
     const repo = repository(async () => item());
-    let startProviderRequest!: () => void;
     const worker = createReconciliationJobWorker({
       repository: repo,
       owner: "worker",
       sliceMs: 10,
-      deferSliceUntilProviderRequest: true,
-      processWorkItem: async (_item, signal, controls) => {
-        startProviderRequest = controls.startProviderRequest;
+      processWorkItem: async (_item, signal) => {
         await new Promise<void>((_resolve, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true }));
       },
     });
 
     const running = worker.runOnce();
-    await vi.advanceTimersByTimeAsync(100);
-    expect(repo.releaseWorkItem).not.toHaveBeenCalled();
-
-    startProviderRequest();
     await vi.advanceTimersByTimeAsync(10);
+    const boundedBeforeCleanup = vi.mocked(repo.releaseWorkItem!).mock.calls.length === 1;
+    worker.abortRun("run");
     await running;
 
-    expect(repo.releaseWorkItem).toHaveBeenCalledWith("run:work:1", "worker", "WORKER_SLICE_EXPIRED");
     vi.useRealTimers();
+    expect(boundedBeforeCleanup).toBe(true);
+    expect(repo.releaseWorkItem).toHaveBeenCalledWith("run:work:1", "worker", "WORKER_SLICE_EXPIRED");
   });
 
   it("keeps polling after a claim failure", async () => {

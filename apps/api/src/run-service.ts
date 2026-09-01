@@ -4,7 +4,7 @@ import {
   parseLedgerCsv,
   runReconciliation,
   planReconciliation,
-  processPlannedBatch,
+  processPlannedComponent,
   ReasoningAdapterError,
   ReconciliationOperationalError,
   ReconciliationRunAbortedError,
@@ -34,7 +34,7 @@ export const CreateRunRequestSchema = z.object({
 
 export type CreateRunRequest = z.infer<typeof CreateRunRequestSchema>;
 export type RunStatus = "PENDING" | "PROCESSING" | "COMPLETED" | "FAILED" | "CANCELLED";
-export type DurableWorkerConfiguration = { concurrency?: number; leaseMs?: number; sliceMs?: number; pollIntervalMs?: number; maxReasoningItemsPerRequest?: number };
+export type DurableWorkerConfiguration = { concurrency?: number; leaseMs?: number; sliceMs?: number; pollIntervalMs?: number };
 
 export interface ReconciliationRunService {
   createRun(request: CreateRunRequest): Promise<{ runId: string; status: "PENDING" | "PROCESSING" | "COMPLETED" }>;
@@ -130,7 +130,7 @@ export function createReconciliationRunService(
 
   async function planDurableRun(runId: string, input: CreateRunRequest): Promise<void> {
     try {
-      await repository.persistPlan!({ ...planReconciliation({ ...input, runId }) }, { maxItemsPerBatch: workerConfiguration.maxReasoningItemsPerRequest });
+      await repository.persistPlan!({ ...planReconciliation({ ...input, runId }) });
       await finalizeDurableRun(runId);
     } catch (error) {
       const code = failureCode(error);
@@ -148,15 +148,14 @@ export function createReconciliationRunService(
     if (!durableJobs || durableWorker !== undefined || repository.getRunInput === undefined || repository.persistPlan === undefined || repository.persistResultCheckpoint === undefined || repository.finalizeRun === undefined) return;
     durableWorker = createReconciliationJobWorker({
       repository, owner: workerOwner,
-      concurrency: workerConfiguration.concurrency ?? 1,
+      concurrency: 1,
       leaseMs: workerConfiguration.leaseMs ?? Math.max(runDeadlineMs * 2, 60_000),
       sliceMs: workerConfiguration.sliceMs ?? runDeadlineMs,
-      deferSliceUntilProviderRequest: true,
       pollIntervalMs: workerConfiguration.pollIntervalMs ?? 1_000,
       onEvent: (event) => {
         if (event.runId === undefined || repository.appendOperationalTrace === undefined) return;
         const type = ({ claimed: "WORK_ITEM_CLAIMED", completed: "WORK_ITEM_COMPLETED", failed: "WORK_ITEM_FAILED", released: "WORK_ITEM_RELEASED", slice_yielded: "WORKER_SLICE_YIELDED" } as const)[event.type];
-        void (async () => {
+        return (async () => {
           await repository.appendOperationalTrace!({ runId: event.runId!, type, message: `Reconciliation work item ${event.type}.`, metadata: { workItemId: event.workItemId, durationMs: event.durationMs, classification: event.classification } });
           if (event.type === "completed") await finalizeDurableRun(event.runId!);
           if (event.type === "failed") {
@@ -179,28 +178,23 @@ export function createReconciliationRunService(
         const input = await repository.getRunInput!(workItem.runId);
         if (input === undefined) throw new Error("RUN_INPUT_NOT_FOUND");
         const plan = planReconciliation({ ...input, runId: workItem.runId });
-        const snapshot = workItem.componentSnapshot as { components?: Array<PlannedReasoningComponent | { componentId: string }> };
-        const components = (snapshot.components ?? []).map((entry) => "promptInput" in entry
-          ? entry as PlannedReasoningComponent
-          : plan.components.find((component) => component.componentId === entry.componentId)).filter((component): component is PlannedReasoningComponent => component !== undefined);
-        const startedAt = Date.now();
-        await repository.appendOperationalTrace?.({
-          runId: workItem.runId,
-          type: "REASONING_BATCH_STARTED",
-          message: "Reasoning batch started.",
-          metadata: { workItemIds: [workItem.workItemId], batchSize: components.length },
-        });
-        const processed = await processPlannedBatch({ runId: workItem.runId, asOfDate: input.asOfDate, components, modelAdapter, signal, onProviderRequestStart: controls.startProviderRequest });
+        const snapshot = workItem.componentSnapshot as PlannedReasoningComponent | { componentId?: string; components?: PlannedReasoningComponent[] };
+        const component = "promptInput" in snapshot
+          ? snapshot as PlannedReasoningComponent
+          : snapshot.componentId !== undefined
+            ? plan.components.find((entry) => entry.componentId === snapshot.componentId)
+            : snapshot.components?.length === 1 ? snapshot.components[0] : undefined;
+        if (component === undefined) throw new Error("WORK_ITEM_MUST_CONTAIN_ONE_INVESTIGATION");
+        const operational = async (type: "GROQ_QUOTA_WAIT_STARTED" | "GROQ_QUOTA_RESERVED" | "PROVIDER_REQUEST_STARTED" | "PROVIDER_REQUEST_COMPLETED", metadata: Record<string, unknown> = {}) => {
+          await repository.appendOperationalTrace?.({ runId: workItem.runId, type, message: type.replaceAll("_", " ").toLowerCase(), metadata: { workItemId: workItem.workItemId, ...metadata } });
+        };
+        const processed = await processPlannedComponent({ runId: workItem.runId, asOfDate: input.asOfDate, component, modelAdapter, signal, onProviderRequestStart: controls.startProviderRequest, onOperationalEvent: operational });
         // Do not let a provider promise that outlived a released worker slice
         // checkpoint results after another worker has reclaimed the item.
         if (signal.aborted) return;
-        await repository.persistResultCheckpoint!({ runId: workItem.runId, results: processed.results, trace: processed.trace.map(toPersistedTrace) });
-        await repository.appendOperationalTrace?.({
-          runId: workItem.runId,
-          type: "REASONING_BATCH_COMPLETED",
-          message: "Reasoning batch completed.",
-          metadata: { workItemIds: [workItem.workItemId], batchSize: components.length, durationMs: Date.now() - startedAt },
-        });
+        await repository.appendOperationalTrace?.({ runId: workItem.runId, type: "VERIFICATION_COMPLETED", message: "Verification completed.", metadata: { workItemId: workItem.workItemId, caseId: component.caseId } });
+        await repository.persistResultCheckpoint!({ runId: workItem.runId, results: [processed.result], trace: processed.trace.map(toPersistedTrace) });
+        await repository.appendOperationalTrace?.({ runId: workItem.runId, type: "RESULT_CHECKPOINTED", message: "Result checkpointed.", metadata: { workItemId: workItem.workItemId, caseId: component.caseId } });
       },
     });
     void durableWorker.run();

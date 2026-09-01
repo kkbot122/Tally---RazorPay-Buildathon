@@ -32,6 +32,12 @@ export const TRACE_EVENT_META: Record<TraceEventType, TraceEventMeta> = {
   WORK_ITEM_CANCELLED: { label: "Work item cancelled", stage: "Outcome", stageClassName: "bg-tally-warning-soft text-tally-warning" },
   REASONING_BATCH_STARTED: { label: "Reasoning request started", stage: "Agent", stageClassName: "bg-tally-accent-soft text-tally-accent" },
   REASONING_BATCH_COMPLETED: { label: "Reasoning request completed", stage: "Agent", stageClassName: "bg-tally-success-soft text-tally-success" },
+  GROQ_QUOTA_WAIT_STARTED: { label: "Groq quota wait started", stage: "Agent", stageClassName: "bg-tally-warning-soft text-tally-warning" },
+  GROQ_QUOTA_RESERVED: { label: "Groq quota reserved", stage: "Agent", stageClassName: "bg-tally-accent-soft text-tally-accent" },
+  PROVIDER_REQUEST_STARTED: { label: "Provider request started", stage: "Agent", stageClassName: "bg-tally-accent-soft text-tally-accent" },
+  PROVIDER_REQUEST_COMPLETED: { label: "Provider request completed", stage: "Agent", stageClassName: "bg-tally-success-soft text-tally-success" },
+  VERIFICATION_COMPLETED: { label: "Verification completed", stage: "Verifier", stageClassName: "bg-tally-success-soft text-tally-success" },
+  RESULT_CHECKPOINTED: { label: "Result checkpointed", stage: "Outcome", stageClassName: "bg-tally-success-soft text-tally-success" },
   REPAIR_STARTED: { label: "Verifier repair started", stage: "Agent", stageClassName: "bg-tally-warning-soft text-tally-warning" },
   WORKER_SLICE_YIELDED: { label: "Worker slice yielded", stage: "Run", stageClassName: "bg-tally-warning-soft text-tally-warning" },
   RUN_CANCELLED: { label: "Run cancelled", stage: "Run", stageClassName: "bg-tally-warning-soft text-tally-warning" },
@@ -150,6 +156,18 @@ export function eventSummary(event: TraceEvent): string {
       return `Reasoning request started for ${numberValue(payload, "batchSize") ?? 0} investigation${numberValue(payload, "batchSize") === 1 ? "" : "s"}`;
     case "REASONING_BATCH_COMPLETED":
       return `Reasoning request completed${numberValue(payload, "durationMs") !== undefined ? ` · ${numberValue(payload, "durationMs")} ms` : ""}`;
+    case "GROQ_QUOTA_WAIT_STARTED":
+      return "Waiting for bounded Groq quota capacity";
+    case "GROQ_QUOTA_RESERVED":
+      return `Groq quota reserved${numberValue(payload, "quotaWaitMs") !== undefined ? ` · ${numberValue(payload, "quotaWaitMs")} ms` : ""}`;
+    case "PROVIDER_REQUEST_STARTED":
+      return "Groq provider request started";
+    case "PROVIDER_REQUEST_COMPLETED":
+      return `Groq provider request completed${numberValue(payload, "durationMs") !== undefined ? ` · ${numberValue(payload, "durationMs")} ms` : ""}`;
+    case "VERIFICATION_COMPLETED":
+      return "Authoritative verification completed";
+    case "RESULT_CHECKPOINTED":
+      return "Verified investigation result checkpointed";
     case "REPAIR_STARTED":
       return `Targeted verifier repair started${numberValue(payload, "repairAttempt") !== undefined ? ` · attempt ${numberValue(payload, "repairAttempt")}` : ""}`;
     case "WORKER_SLICE_YIELDED":
