@@ -24,6 +24,8 @@ Configure the services from the repository root (`/`) so workspace packages rema
 - Start command: `pnpm --filter @tally/api start`
 - Healthcheck path: `/health`
 
+These commands run from the repository root.
+
 Required Railway variables:
 
 - `NODE_ENV=production`
