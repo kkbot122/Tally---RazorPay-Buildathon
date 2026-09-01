@@ -109,6 +109,7 @@ export function createReconciliationRunService(
       concurrency: workerConfiguration.concurrency ?? 1,
       leaseMs: workerConfiguration.leaseMs ?? Math.max(runDeadlineMs * 2, 60_000),
       sliceMs: workerConfiguration.sliceMs ?? runDeadlineMs,
+      deferSliceUntilProviderRequest: true,
       pollIntervalMs: workerConfiguration.pollIntervalMs ?? 1_000,
       onEvent: (event) => {
         if (event.runId === undefined || repository.appendOperationalTrace === undefined) return;
@@ -122,7 +123,7 @@ export function createReconciliationRunService(
           void repository.markRunFailed(event.runId, event.classification ?? "WORK_ITEM_FAILED");
         }
       },
-      processWorkItem: async (workItem, signal) => {
+      processWorkItem: async (workItem, signal, controls) => {
         const input = await repository.getRunInput!(workItem.runId);
         if (input === undefined) throw new Error("RUN_INPUT_NOT_FOUND");
         const plan = planReconciliation({ ...input, runId: workItem.runId });
@@ -137,7 +138,7 @@ export function createReconciliationRunService(
           message: "Reasoning batch started.",
           metadata: { workItemIds: [workItem.workItemId], batchSize: components.length },
         });
-        const processed = await processPlannedBatch({ runId: workItem.runId, asOfDate: input.asOfDate, components, modelAdapter, signal });
+        const processed = await processPlannedBatch({ runId: workItem.runId, asOfDate: input.asOfDate, components, modelAdapter, signal, onProviderRequestStart: controls.startProviderRequest });
         // Do not let a provider promise that outlived a released worker slice
         // checkpoint results after another worker has reclaimed the item.
         if (signal.aborted) return;

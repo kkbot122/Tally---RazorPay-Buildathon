@@ -134,6 +134,19 @@ describe("verification persistence projection", () => {
 });
 
 describe("durable work-item claims", () => {
+  it("recovers only runs with runnable work in stable oldest-first order", async () => {
+    const execute = vi.fn(async (_query: unknown) => []);
+    const repository = createReconciliationRunRepository({ execute } as never);
+
+    await repository.getRecoverableRunIds!();
+
+    const query = new PgDialect().sqlToQuery(execute.mock.calls[0]![0] as SQL);
+    expect(query.sql).toContain("EXISTS");
+    expect(query.sql).toContain("work.status = 'PENDING'");
+    expect(query.sql).toContain("work.lease_expires_at < now()");
+    expect(query.sql).toContain("ORDER BY runs.created_at, runs.run_id");
+  });
+
   it("renders an unfiltered claim without interpolating an undefined run id", async () => {
     const execute = vi.fn(async (_query: unknown) => []);
     const repository = createReconciliationRunRepository({ execute } as never);
@@ -166,5 +179,24 @@ describe("durable work-item claims", () => {
 
     const query = new PgDialect().sqlToQuery(execute.mock.calls[0]![0] as SQL);
     expect(query.sql).toContain("total_work_items = (SELECT count(*)::int FROM reconciliation_work_items");
+  });
+
+  it("locks a run before allocating an operational trace sequence", async () => {
+    const execute = vi.fn(async (_query: unknown) => []);
+    const where = vi.fn(async () => [{ maxSequence: 4 }]);
+    const from = vi.fn(() => ({ where }));
+    const select = vi.fn(() => ({ from }));
+    const onConflictDoNothing = vi.fn(async () => undefined);
+    const values = vi.fn(() => ({ onConflictDoNothing }));
+    const insert = vi.fn(() => ({ values }));
+    const tx = { execute, select, insert };
+    const db = { transaction: vi.fn(async (operation: (transaction: typeof tx) => Promise<void>) => operation(tx)) };
+    const repository = createReconciliationRunRepository(db as never);
+
+    await repository.appendOperationalTrace!({ runId: "run", type: "WORK_ITEM_CLAIMED", message: "claimed" });
+
+    const query = new PgDialect().sqlToQuery(execute.mock.calls[0]![0] as SQL);
+    expect(query.sql).toContain("pg_advisory_xact_lock");
+    expect(query.params).toEqual(["run"]);
   });
 });

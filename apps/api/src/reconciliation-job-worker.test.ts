@@ -47,6 +47,33 @@ describe("reconciliation job worker", () => {
     expect(repo.releaseWorkItem).toHaveBeenCalledWith("run:work:1", "worker", "WORKER_SLICE_EXPIRED");
   });
 
+  it("does not spend the provider execution slice while waiting for quota capacity", async () => {
+    vi.useFakeTimers();
+    const repo = repository(async () => item());
+    let startProviderRequest!: () => void;
+    const worker = createReconciliationJobWorker({
+      repository: repo,
+      owner: "worker",
+      sliceMs: 10,
+      deferSliceUntilProviderRequest: true,
+      processWorkItem: async (_item, signal, controls) => {
+        startProviderRequest = controls.startProviderRequest;
+        await new Promise<void>((_resolve, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true }));
+      },
+    });
+
+    const running = worker.runOnce();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(repo.releaseWorkItem).not.toHaveBeenCalled();
+
+    startProviderRequest();
+    await vi.advanceTimersByTimeAsync(10);
+    await running;
+
+    expect(repo.releaseWorkItem).toHaveBeenCalledWith("run:work:1", "worker", "WORKER_SLICE_EXPIRED");
+    vi.useRealTimers();
+  });
+
   it("keeps polling after a claim failure", async () => {
     let attempts = 0;
     const repo = repository(async () => {
@@ -119,45 +146,6 @@ describe("reconciliation job worker", () => {
     await worker.run();
 
     expect(repo.claimWorkItem).toHaveBeenCalledWith({ runId: "run", owner: "worker", leaseMs: 60_000 });
-  });
-
-  it("reports worker startup, recovery results, and empty claims for production diagnosis", async () => {
-    const log = vi.spyOn(console, "info").mockImplementation(() => {});
-    const repo = repository(async () => undefined);
-    let worker!: ReturnType<typeof createReconciliationJobWorker>;
-    repo.getRecoverableRunIds = vi.fn(async () => ["run"]);
-    repo.claimWorkItem = vi.fn(async () => {
-      worker.stop();
-      return undefined;
-    });
-    worker = createReconciliationJobWorker({ repository: repo, owner: "worker", pollIntervalMs: 1, processWorkItem: async () => {} });
-
-    await worker.run();
-
-    expect(log).toHaveBeenCalledWith("[DEBUG-worker-a91f] worker started", { owner: "worker", concurrency: 1, pollIntervalMs: 1 });
-    expect(log).toHaveBeenCalledWith("[DEBUG-worker-a91f] getRecoverableRunIds completed", expect.objectContaining({ count: 1 }));
-    expect(log).toHaveBeenCalledWith("[DEBUG-worker-a91f] claimWorkItem completed", expect.objectContaining({ runId: "run", outcome: "empty" }));
-    log.mockRestore();
-  });
-
-  it("reports a recoverable-run query that remains pending for ten seconds", async () => {
-    vi.useFakeTimers();
-    const log = vi.spyOn(console, "info").mockImplementation(() => {});
-    let resolveRecovery!: (runIds: string[]) => void;
-    const repo = repository(async () => undefined);
-    repo.getRecoverableRunIds = vi.fn(() => new Promise<string[]>((resolve) => { resolveRecovery = resolve; }));
-    const worker = createReconciliationJobWorker({ repository: repo, owner: "worker", pollIntervalMs: 1, processWorkItem: async () => {} });
-
-    const running = worker.run();
-    await vi.advanceTimersByTimeAsync(10_000);
-
-    expect(log).toHaveBeenCalledWith("[DEBUG-worker-a91f] getRecoverableRunIds still pending", expect.objectContaining({ durationMs: 10_000 }));
-    worker.stop();
-    resolveRecovery([]);
-    await vi.advanceTimersByTimeAsync(1);
-    await running;
-    log.mockRestore();
-    vi.useRealTimers();
   });
 
   it("aborts in-flight provider work when its run is cancelled", async () => {

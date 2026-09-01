@@ -41,6 +41,7 @@ function fillForm() {
 }
 
 beforeEach(() => {
+  window.localStorage.clear();
   api.createRun.mockResolvedValue({ runId: "run_001", status: "COMPLETED" });
   api.getRun.mockResolvedValue(completedSummary());
   api.getRunResults.mockResolvedValue(resultSet);
@@ -53,6 +54,31 @@ afterEach(() => {
 });
 
 describe("T030 dashboard workflows", () => {
+  it("restores the latest persisted run after a page reload without creating another run", async () => {
+    window.localStorage.setItem("tally.activeRunId", "run_001");
+
+    render(<Dashboard />);
+
+    await waitFor(() => expect(screen.getByText("4 of 4 persisted results")).toBeTruthy());
+    expect(api.getRun).toHaveBeenCalledWith("run_001");
+    expect(api.getRunResults).toHaveBeenCalledWith("run_001");
+    expect(api.createRun).not.toHaveBeenCalled();
+  });
+
+  it("resumes polling a persisted processing run after a page reload", async () => {
+    window.localStorage.setItem("tally.activeRunId", "run_processing");
+    api.getRun.mockResolvedValueOnce({ runId: "run_processing", status: "PROCESSING", totalCases: 4, reconciled: 1, explainedOutstanding: 0, discrepancies: 0, unresolved: 0, totalWorkItems: 2, completedWorkItems: 0 });
+    api.getRun.mockImplementation(() => new Promise(() => {}));
+    api.getRunResults.mockResolvedValueOnce(resultSet.slice(0, 1));
+
+    render(<Dashboard />);
+
+    await waitFor(() => expect(screen.getByText("PROCESSING")).toBeTruthy());
+    expect(screen.getByRole("button", { name: "Stop run" })).toBeTruthy();
+    expect(screen.getByText("1 of 1 persisted results")).toBeTruthy();
+    expect(api.createRun).not.toHaveBeenCalled();
+  });
+
   it("allows an invalid attempt followed by a valid submission", async () => {
     render(<Dashboard />);
     fireEvent.submit(screen.getByRole("button", { name: "Run reconciliation" }).closest("form")!);

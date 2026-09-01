@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import React from "react";
 import type { FinalOutcome } from "@tally/contracts";
 
@@ -24,6 +24,7 @@ const sectionDescription = "m-0 text-tally-ink-secondary";
 const fieldLabel = "text-[11px] font-semibold uppercase leading-4 tracking-[.04em] text-tally-ink-muted";
 const control = "h-[38px] w-full rounded border border-tally-border bg-tally-surface px-[9px] py-[7px] text-tally-ink focus-visible:outline-tally-accent";
 const secondaryButton = "min-h-[38px] rounded border border-tally-border bg-tally-surface px-[14px] py-2 font-semibold text-tally-ink-secondary hover:bg-tally-surface-subtle";
+const activeRunStorageKey = "tally.activeRunId";
 
 const outcomeStyles: Record<FinalOutcome, string> = {
   RECONCILED: "bg-tally-success-soft text-tally-success",
@@ -95,6 +96,7 @@ export default function Dashboard() {
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [selectedResult, setSelectedResult] = useState<RunResult | null>(null);
   const submissionLock = useRef(createSubmissionLock());
+  const resumeStarted = useRef(false);
   const selectedTriggerRef = useRef<HTMLButtonElement | null>(null);
 
   const filteredResults = useMemo(() => filterResults(results, filter), [filter, results]);
@@ -175,6 +177,29 @@ export default function Dashboard() {
     }
   }
 
+  useEffect(() => {
+    if (resumeStarted.current) return;
+    resumeStarted.current = true;
+    const persistedRunId = window.localStorage.getItem(activeRunStorageKey);
+    if (persistedRunId === null) return;
+
+    setActiveRunId(persistedRunId);
+    setIsRunning(true);
+    setStatusMessage("Restoring the latest reconciliation run…");
+    void waitForRun(persistedRunId)
+      .then(() => setStatusMessage(null))
+      .catch((runError: unknown) => {
+        setReadError(errorCode(runError) === "RUN_FAILED"
+          ? `Run ${persistedRunId} failed operationally; no finance outcome was produced.`
+          : runError instanceof Error ? runError.message : "Run results could not be loaded.");
+        setReadErrorCode(errorCode(runError));
+        setStatusMessage(null);
+      })
+      .finally(() => setIsRunning(false));
+    // This is intentionally mount-only: waitForRun owns polling after restoration.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   async function stopRun() {
     if (activeRunId === null) return;
     setStatusMessage("Cancellation requested…");
@@ -208,6 +233,7 @@ export default function Dashboard() {
       const [bankCsv, ledgerCsv] = await Promise.all([bankFile.text(), ledgerFile.text()]);
       const created = await createRun({ asOfDate, bankCsv, ledgerCsv });
       createdRunId = created.runId;
+      window.localStorage.setItem(activeRunStorageKey, created.runId);
       setActiveRunId(created.runId);
       setSummary({ runId: created.runId, status: created.status, totalCases: 0, reconciled: 0, explainedOutstanding: 0, discrepancies: 0, unresolved: 0 });
       setResults([]);

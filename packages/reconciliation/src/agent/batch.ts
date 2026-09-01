@@ -5,7 +5,7 @@ export type ReasoningBatchItem = ReasoningModelInput & { componentId: string };
 export type ReasoningBatchProposal = { componentId: string; proposal: AgentProposal };
 
 export interface ReasoningBatchAdapter {
-  generateBatchProposal(input: { items: readonly ReasoningBatchItem[]; signal?: AbortSignal }): Promise<unknown>;
+  generateBatchProposal(input: { items: readonly ReasoningBatchItem[]; signal?: AbortSignal; onProviderRequestStart?: () => void }): Promise<unknown>;
 }
 
 /** Validate the provider's component envelope before any component is finalized. */

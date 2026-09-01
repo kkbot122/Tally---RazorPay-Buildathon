@@ -75,6 +75,7 @@ export class OpenAICompatibleChatCompletionsAdapter implements ReasoningModelAda
           const reservation = this.provider === "groq"
             ? await this.groqRateLimiter!.reserve(estimateRequestTokens(instruction, input.retryFeedback), input.signal)
             : undefined;
+          input.onProviderRequestStart?.();
           const request = {
           model: this.model,
           messages: [
@@ -147,12 +148,13 @@ export class OpenAICompatibleChatCompletionsAdapter implements ReasoningModelAda
     }
   }
 
-  async generateBatchProposal(input: { items: readonly (ReasoningModelInput & { componentId: string })[]; signal?: AbortSignal }): Promise<unknown> {
+  async generateBatchProposal(input: { items: readonly (ReasoningModelInput & { componentId: string })[]; signal?: AbortSignal; onProviderRequestStart?: () => void }): Promise<unknown> {
     if (input.items.length < 1 || input.items.length > 5) throw new ReasoningAdapterError("AI_SCHEMA_ERROR", "The reasoning batch must contain between one and five components.");
     const instruction = `${RECONCILIATION_BATCH_INSTRUCTIONS}\n\n${input.items.map((item) => `COMPONENT ${item.componentId}:\n${item.input}`).join("\n\n")}`;
     const startedAt = Date.now();
     try {
       const reservation = this.provider === "groq" ? await this.groqRateLimiter!.reserve(estimateRequestTokens(instruction, undefined), input.signal) : undefined;
+      input.onProviderRequestStart?.();
       const request = {
         model: this.model,
         messages: [{ role: "system", content: `${PROPOSAL_FORMAT}\nReturn a JSON array of objects shaped { componentId, proposal }.` }, { role: "user", content: instruction }],

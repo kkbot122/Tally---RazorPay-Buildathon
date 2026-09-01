@@ -41,6 +41,7 @@ export class OpenAIResponsesAdapter implements ReasoningModelAdapter {
   async generateProposal(input: ReasoningModelInput): Promise<AgentProposal> {
     let response: Awaited<ReturnType<ResponsesParseClient["parse"]>>;
     try {
+      input.onProviderRequestStart?.();
       response = await this.client.parse({
         model: this.model,
         ...(this.maxCompletionTokens === undefined ? {} : { max_output_tokens: this.maxCompletionTokens }),
@@ -62,10 +63,11 @@ export class OpenAIResponsesAdapter implements ReasoningModelAdapter {
     return parsed.data;
   }
 
-  async generateBatchProposal(input: { items: readonly (ReasoningModelInput & { componentId: string })[]; signal?: AbortSignal }): Promise<unknown> {
+  async generateBatchProposal(input: { items: readonly (ReasoningModelInput & { componentId: string })[]; signal?: AbortSignal; onProviderRequestStart?: () => void }): Promise<unknown> {
     if (input.items.length < 1 || input.items.length > 5) throw new ReasoningAdapterError("AI_SCHEMA_ERROR", "The reasoning batch must contain between one and five components.");
     const prompt = `Analyze each independent component separately. Return exactly one proposal for every componentId in a proposals array. Never use records from another component.\n\n${input.items.map((item) => `COMPONENT ${item.componentId}:\n${item.input}`).join("\n\n")}`;
     try {
+      input.onProviderRequestStart?.();
       const response = await this.client.parse({
         model: this.model,
         ...(this.maxCompletionTokens === undefined ? {} : { max_output_tokens: this.maxCompletionTokens }),

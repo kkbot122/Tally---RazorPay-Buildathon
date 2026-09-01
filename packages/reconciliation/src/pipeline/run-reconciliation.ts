@@ -303,14 +303,14 @@ export function planReconciliation(input: Pick<RunReconciliationInput, "runId" |
 }
 
 export async function processPlannedComponent(
-  input: { runId: string; asOfDate: string; component: PlannedReasoningComponent; modelAdapter: RunReconciliationInput["modelAdapter"]; usedRecords?: { bankRecordIds: Set<string>; ledgerRecordIds: Set<string> }; signal?: AbortSignal },
+  input: { runId: string; asOfDate: string; component: PlannedReasoningComponent; modelAdapter: RunReconciliationInput["modelAdapter"]; usedRecords?: { bankRecordIds: Set<string>; ledgerRecordIds: Set<string> }; signal?: AbortSignal; onProviderRequestStart?: () => void },
 ): Promise<{ result: FinalReconciliationResult; trace: readonly RecordedTraceEvent[] }> {
   const records = createRecordLookup(input.component.bankRecords, input.component.ledgerRecords);
   const item: PreparedReasoningItem = { ...input.component, skipReciprocalAttempt: false };
   const trace = createTraceRecorder({ runId: `${input.runId}:component:${input.component.componentId}` });
   trace.record({ type: "AGENT_STARTED", caseId: input.component.caseId, payload: { primarySide: input.component.primary.side, primaryRecordId: input.component.primary.recordId, candidateCount: input.component.candidateSet.candidates.length } });
   const usedRecords = input.usedRecords ?? cloneUsedRecords(emptyUsedRecordState());
-  const proposal = await generateProposalWithVerifierRetry(item, input.modelAdapter.generateProposal.bind(input.modelAdapter), records, input.asOfDate, cloneUsedRecords(usedRecords), trace, input.signal);
+  const proposal = await generateProposalWithVerifierRetry(item, input.modelAdapter.generateProposal.bind(input.modelAdapter), records, input.asOfDate, cloneUsedRecords(usedRecords), trace, input.signal, undefined, input.onProviderRequestStart);
   const results: FinalReconciliationResult[] = [];
   finalizeAgentProposal(item, proposal, records, input.runId, input.asOfDate, usedRecords, new Set(), results, trace);
   return { result: results[0]!, trace: trace.getEvents() };
@@ -322,6 +322,7 @@ export async function processPlannedBatch(input: {
   components: readonly PlannedReasoningComponent[];
   modelAdapter: RunReconciliationInput["modelAdapter"];
   signal?: AbortSignal;
+  onProviderRequestStart?: () => void;
   usedRecords?: { bankRecordIds: Set<string>; ledgerRecordIds: Set<string> };
 }): Promise<{ results: FinalReconciliationResult[]; trace: readonly RecordedTraceEvent[] }> {
   if (input.components.length === 0) return { results: [], trace: [] };
@@ -335,7 +336,7 @@ export async function processPlannedBatch(input: {
     const processed = await Promise.all(input.components.map((component) => processPlannedComponent({ ...input, component })));
     return { results: processed.map((item) => item.result), trace: processed.flatMap((item) => item.trace) };
   }
-  const response = await input.modelAdapter.generateBatchProposal({ items: input.components.map((component) => ({ componentId: component.componentId, ...component.promptInput })), signal: input.signal });
+  const response = await input.modelAdapter.generateBatchProposal({ items: input.components.map((component) => ({ componentId: component.componentId, ...component.promptInput })), signal: input.signal, onProviderRequestStart: input.onProviderRequestStart });
   const proposals = parseReasoningBatchResponse(response, input.components.map((component) => component.componentId));
   const results: FinalReconciliationResult[] = [];
   const traces: RecordedTraceEvent[] = [];
@@ -362,7 +363,7 @@ function componentsOverlap(components: readonly PlannedReasoningComponent[]): bo
 }
 
 async function processPlannedComponentWithProposal(
-  input: { runId: string; asOfDate: string; modelAdapter: RunReconciliationInput["modelAdapter"]; signal?: AbortSignal },
+  input: { runId: string; asOfDate: string; modelAdapter: RunReconciliationInput["modelAdapter"]; signal?: AbortSignal; onProviderRequestStart?: () => void },
   component: PlannedReasoningComponent,
   initialProposal: AgentProposal,
 ): Promise<{ result: FinalReconciliationResult; trace: readonly RecordedTraceEvent[] }> {
@@ -375,7 +376,7 @@ async function processPlannedComponentWithProposal(
   const firstVerification = verifyAgentProposal(item, proposal, records, input.asOfDate, emptyUsedRecordState());
   if (firstVerification.status === "REJECTED" && firstVerification.failures.some((failure) => isRepairableModelFailure(failure.code))) {
     trace.record({ type: "REPAIR_STARTED", payload: { workItemId: component.componentId, repairAttempt: 1 } });
-    proposal = await input.modelAdapter.generateProposal({ ...component.promptInput, retryFeedback: JSON.stringify({ caseId: component.caseId, verifierFailures: firstVerification.failures }), signal: input.signal });
+    proposal = await input.modelAdapter.generateProposal({ ...component.promptInput, retryFeedback: JSON.stringify({ caseId: component.caseId, verifierFailures: firstVerification.failures }), signal: input.signal, onProviderRequestStart: input.onProviderRequestStart });
     trace.record({ type: "AGENT_PROPOSED", caseId: component.caseId, payload: proposal });
   }
   const output: FinalReconciliationResult[] = [];
@@ -475,8 +476,9 @@ async function generateProposalWithVerifierRetry(
   trace: TraceRecorder,
   signal?: AbortSignal,
   onRepair?: () => void,
+  onProviderRequestStart?: () => void,
 ): Promise<AgentProposal> {
-  let proposal = await requestProposal({ ...item.promptInput, signal });
+  let proposal = await requestProposal({ ...item.promptInput, signal, onProviderRequestStart });
   trace.record({ type: "AGENT_PROPOSED", caseId: item.caseId, payload: proposal });
 
   for (let attempt = 0; attempt < 1; attempt += 1) {
@@ -492,6 +494,7 @@ async function generateProposalWithVerifierRetry(
       ...item.promptInput,
       retryFeedback: JSON.stringify({ caseId: item.caseId, proposedBankRecordIds: proposal.bankRecordIds, proposedLedgerRecordIds: proposal.ledgerRecordIds, verifierFailures: feedback }),
       signal,
+      onProviderRequestStart,
     });
     trace.record({ type: "AGENT_PROPOSED", caseId: item.caseId, payload: proposal });
   }

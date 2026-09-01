@@ -7,12 +7,14 @@ export type ReasoningModelInput = {
   retryFeedback?: string;
   /** Cancels provider work when the run deadline or user cancellation fires. */
   signal?: AbortSignal;
+  /** Called after any capacity wait and immediately before a provider request. */
+  onProviderRequestStart?: () => void;
 };
 
 export interface ReasoningModelAdapter {
   generateProposal(input: ReasoningModelInput): Promise<AgentProposal>;
   /** Optional single-request path for independent components. */
-  generateBatchProposal?(input: { items: readonly (ReasoningModelInput & { componentId: string })[]; signal?: AbortSignal }): Promise<unknown>;
+  generateBatchProposal?(input: { items: readonly (ReasoningModelInput & { componentId: string })[]; signal?: AbortSignal; onProviderRequestStart?: () => void }): Promise<unknown>;
 }
 
 export type ReasoningAdapterErrorCode = "AI_REQUEST_ERROR" | "AI_SCHEMA_ERROR";

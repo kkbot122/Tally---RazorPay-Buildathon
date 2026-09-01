@@ -287,8 +287,19 @@ export function createReconciliationRunRepository(db: DatabaseClient): Reconcili
       return row === undefined ? undefined : { runId: row.runId, asOfDate: row.asOfDate, bankCsv: row.bankCsv, ledgerCsv: row.ledgerCsv };
     },
     async getRecoverableRunIds() {
-      const rows = await db.select({ runId: reconciliationRuns.runId }).from(reconciliationRuns).where(sql`${reconciliationRuns.status} IN ('PENDING', 'PROCESSING')`);
-      return rows.map((row) => row.runId);
+      const rows = await db.execute(sql`
+        SELECT runs.run_id
+        FROM reconciliation_runs AS runs
+        WHERE runs.status IN ('PENDING', 'PROCESSING')
+          AND EXISTS (
+            SELECT 1
+            FROM reconciliation_work_items AS work
+            WHERE work.run_id = runs.run_id
+              AND (work.status = 'PENDING' OR (work.status = 'LEASED' AND work.lease_expires_at < now()))
+          )
+        ORDER BY runs.created_at, runs.run_id
+      `) as unknown as Array<{ run_id: string }>;
+      return rows.map((row) => row.run_id);
     },
     async persistPlan(plan, options) {
       const batches = partitionReasoningComponents(plan.components.map((component) => ({
@@ -330,6 +341,7 @@ export function createReconciliationRunRepository(db: DatabaseClient): Reconcili
       await db.transaction(async (tx) => {
         if (input.results.length > 0) await tx.insert(reconciliationResults).values(input.results.map((result, index) => mapResultRow(input.runId, result, index, new Map(), new Map()))).onConflictDoNothing();
         if (input.trace !== undefined && input.trace.length > 0) {
+          await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${input.runId}))`);
           const maxRows = await tx.select({ maxSequence: sql<number>`coalesce(max(${traceEvents.sequenceNo}), 0)` }).from(traceEvents).where(eq(traceEvents.runId, input.runId));
           const offset = Number(maxRows[0]?.maxSequence ?? 0);
           await tx.insert(traceEvents).values(input.trace.map((event, index) => ({ eventId: `${input.runId}:checkpoint:${event.eventId}`, runId: input.runId, sequenceNo: offset + index + 1, caseId: event.caseId, type: event.type, occurredAt: new Date(event.occurredAt), message: event.message, metadata: event.payload }))).onConflictDoNothing();
@@ -351,6 +363,7 @@ export function createReconciliationRunRepository(db: DatabaseClient): Reconcili
     },
     async appendOperationalTrace(input) {
       await db.transaction(async (tx) => {
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${input.runId}))`);
         const rows = await tx.select({ maxSequence: sql<number>`coalesce(max(${traceEvents.sequenceNo}), 0)` }).from(traceEvents).where(eq(traceEvents.runId, input.runId));
         const sequenceNo = Number(rows[0]?.maxSequence ?? 0) + 1;
         await tx.insert(traceEvents).values({

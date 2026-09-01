@@ -235,4 +235,22 @@ describe("OpenAICompatibleChatCompletionsAdapter", () => {
     await expect(adapter.generateProposal({ input: "input" })).resolves.toEqual(proposal);
     await expect(limiter.reserve(1_500)).resolves.toMatchObject({ tokens: 1_500 });
   });
+
+  it("starts the provider execution slice only after Groq quota is reserved", async () => {
+    const reserve = vi.fn(async () => ({ reservationId: "reservation", requests: 1, tokens: 100 }));
+    const settle = vi.fn(async () => undefined);
+    const create = vi.fn().mockResolvedValue({ choices: [{ message: { content: JSON.stringify(proposal) } }] });
+    const onProviderRequestStart = vi.fn();
+    const adapter = new OpenAICompatibleChatCompletionsAdapter({
+      provider: "groq",
+      client: { create } as never,
+      groqRateLimiter: { reserve, settle, blockFor: vi.fn() } as never,
+    });
+
+    await adapter.generateProposal({ input: "input", onProviderRequestStart });
+
+    expect(onProviderRequestStart).toHaveBeenCalledOnce();
+    expect(reserve.mock.invocationCallOrder[0]).toBeLessThan(onProviderRequestStart.mock.invocationCallOrder[0]!);
+    expect(onProviderRequestStart.mock.invocationCallOrder[0]).toBeLessThan(create.mock.invocationCallOrder[0]!);
+  });
 });
