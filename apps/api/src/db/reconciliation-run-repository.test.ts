@@ -157,4 +157,14 @@ describe("durable work-item claims", () => {
     ]));
     expect(query.params.some((parameter) => parameter instanceof Date)).toBe(false);
   });
+
+  it("does not finalize when planned work items were not persisted", async () => {
+    const execute = vi.fn(async (_query: unknown) => []);
+    const repository = createReconciliationRunRepository({ execute } as never);
+
+    await repository.finalizeRun!("run-missing-work");
+
+    const query = new PgDialect().sqlToQuery(execute.mock.calls[0]![0] as SQL);
+    expect(query.sql).toContain("total_work_items = (SELECT count(*)::int FROM reconciliation_work_items");
+  });
 });

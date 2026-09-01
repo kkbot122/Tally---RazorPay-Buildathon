@@ -291,28 +291,28 @@ export function createReconciliationRunRepository(db: DatabaseClient): Reconcili
       return rows.map((row) => row.runId);
     },
     async persistPlan(plan, options) {
+      const batches = partitionReasoningComponents(plan.components.map((component) => ({
+        ...component,
+        candidateCount: component.candidateSet.candidates.length,
+        bankRecordIds: [
+          ...component.decision.bankRecordIds,
+          ...(component.primary.side === "BANK" ? [component.primary.recordId] : []),
+          ...component.candidateSet.candidates.filter((candidate) => candidate.side === "BANK").map((candidate) => candidate.recordId),
+        ],
+        ledgerRecordIds: [
+          ...component.decision.ledgerRecordIds,
+          ...(component.primary.side === "LEDGER" ? [component.primary.recordId] : []),
+          ...component.candidateSet.candidates.filter((candidate) => candidate.side === "LEDGER").map((candidate) => candidate.recordId),
+        ],
+        snapshot: component, candidateSnapshot: component.candidateSet,
+      })), { maxItemsPerBatch: options?.maxItemsPerBatch ?? 3, maxCandidates: 12 });
       await db.transaction(async (tx) => {
-        const updated = await tx.update(reconciliationRuns).set({ status: "PROCESSING", startedAt: new Date(plan.trace[0]?.occurredAt ?? Date.now()), totalBankRecords: plan.bankRecords.length, totalLedgerRecords: plan.ledgerRecords.length, totalWorkItems: plan.components.length, configuration: { asOfDate: plan.asOfDate, planned: true } }).where(sql`${reconciliationRuns.runId} = ${plan.runId} AND ${reconciliationRuns.status} IN ('PENDING', 'PROCESSING')`);
+        const updated = await tx.update(reconciliationRuns).set({ status: "PROCESSING", startedAt: new Date(plan.trace[0]?.occurredAt ?? Date.now()), totalBankRecords: plan.bankRecords.length, totalLedgerRecords: plan.ledgerRecords.length, totalWorkItems: batches.length, configuration: { asOfDate: plan.asOfDate, planned: true } }).where(sql`${reconciliationRuns.runId} = ${plan.runId} AND ${reconciliationRuns.status} IN ('PENDING', 'PROCESSING')`);
         if (updated.length === 0) return;
         if (plan.deterministicResults.length > 0) {
           await tx.insert(reconciliationResults).values(plan.deterministicResults.map((result, index) => mapResultRow(plan.runId, result, index, new Map(), new Map()))).onConflictDoNothing();
         }
         if (plan.trace.length > 0) await tx.insert(traceEvents).values(plan.trace.map((event) => ({ eventId: event.eventId, runId: event.runId, sequenceNo: event.sequenceNo, caseId: event.caseId, type: event.type, occurredAt: new Date(event.occurredAt), message: event.message, metadata: event.payload }))).onConflictDoNothing();
-        const batches = partitionReasoningComponents(plan.components.map((component) => ({
-          ...component,
-          candidateCount: component.candidateSet.candidates.length,
-          bankRecordIds: [
-            ...component.decision.bankRecordIds,
-            ...(component.primary.side === "BANK" ? [component.primary.recordId] : []),
-            ...component.candidateSet.candidates.filter((candidate) => candidate.side === "BANK").map((candidate) => candidate.recordId),
-          ],
-          ledgerRecordIds: [
-            ...component.decision.ledgerRecordIds,
-            ...(component.primary.side === "LEDGER" ? [component.primary.recordId] : []),
-            ...component.candidateSet.candidates.filter((candidate) => candidate.side === "LEDGER").map((candidate) => candidate.recordId),
-          ],
-          snapshot: component, candidateSnapshot: component.candidateSet,
-        })), { maxItemsPerBatch: options?.maxItemsPerBatch ?? 3, maxCandidates: 12 });
         if (batches.length > 0) await tx.insert(reconciliationWorkItems).values(batches.map((batch, index) => ({
           workItemId: `${plan.runId}:work:${index + 1}`, runId: plan.runId, sequenceNo: index + 1,
           caseIds: batch.map((component) => component.caseId),
@@ -341,6 +341,7 @@ export function createReconciliationRunRepository(db: DatabaseClient): Reconcili
         UPDATE reconciliation_runs
         SET status = 'COMPLETED', completed_at = now(), pending_work_items = 0, active_work_items = 0
         WHERE run_id = ${runId} AND status = 'PROCESSING'
+          AND total_work_items = (SELECT count(*)::int FROM reconciliation_work_items WHERE reconciliation_work_items.run_id = ${runId})
           -- A failed work item has no persisted terminal finance outcome. Never
           -- report such a run as completed merely because nothing is queued.
           AND NOT EXISTS (SELECT 1 FROM reconciliation_work_items WHERE reconciliation_work_items.run_id = ${runId} AND status IN ('PENDING', 'LEASED', 'FAILED'))
