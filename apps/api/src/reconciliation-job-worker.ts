@@ -94,21 +94,14 @@ export function createReconciliationJobWorker(options: ReconciliationJobWorkerOp
   async function run(runId?: string): Promise<void> {
     while (!stopped) {
       let count = 0;
-      let stage: "getRecoverableRunIds" | "claimWorkItem" = runId === undefined && repository.getRecoverableRunIds !== undefined
-        ? "getRecoverableRunIds"
-        : "claimWorkItem";
       try {
-        if (runId !== undefined || repository.getRecoverableRunIds === undefined) {
-          count = await runOnce(runId);
-        } else {
-          const recoverableRunIds = await repository.getRecoverableRunIds();
-          for (const recoverableRunId of recoverableRunIds) {
-            stage = "claimWorkItem";
-            count += await runOnce(recoverableRunId);
-          }
-        }
+        // claimWorkItem is already the atomic source of truth for runnable
+        // work. Discovery is useful during recovery planning, but must never
+        // gate claims: a stale/empty discovery read otherwise leaves valid
+        // pending rows untouched forever.
+        count = await runOnce(runId);
       } catch (error) {
-        console.error(`[reconciliation-worker] ${stage} failed`, error);
+        console.error("[reconciliation-worker] claimWorkItem failed", error);
         // A transient database failure must not silently kill the durable
         // worker; the next poll can reclaim the pending item.
       }

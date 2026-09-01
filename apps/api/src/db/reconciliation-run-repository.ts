@@ -222,17 +222,19 @@ export function createReconciliationRunRepository(db: DatabaseClient): Reconcili
       // The postgres driver renders an undefined interpolation as an empty SQL
       // fragment. The normal worker loop has no runId filter, so use TRUE
       // instead of interpolating that undefined value.
-      const runScope = runId === undefined ? sql`TRUE` : sql`run_id = ${runId}`;
+      const runScope = runId === undefined ? sql`TRUE` : sql`work.run_id = ${runId}`;
       const rows = await db.execute(sql`
         UPDATE reconciliation_work_items
         SET status = 'LEASED', lease_owner = ${owner}, lease_expires_at = ${expiry},
             attempt_count = attempt_count + 1, updated_at = now()
         WHERE work_item_id = (
-          SELECT work_item_id FROM reconciliation_work_items
+          SELECT work.work_item_id
+          FROM reconciliation_work_items AS work
+          INNER JOIN reconciliation_runs AS runs ON runs.run_id = work.run_id
           WHERE ${runScope}
-            AND (status = 'PENDING' OR (status = 'LEASED' AND lease_expires_at < now()))
-            AND run_id IN (SELECT run_id FROM reconciliation_runs WHERE status IN ('PENDING', 'PROCESSING'))
-          ORDER BY run_id, sequence_no
+            AND (work.status = 'PENDING' OR (work.status = 'LEASED' AND work.lease_expires_at < now()))
+            AND runs.status IN ('PENDING', 'PROCESSING')
+          ORDER BY runs.created_at DESC, work.sequence_no
           FOR UPDATE SKIP LOCKED LIMIT 1
         )
         RETURNING *

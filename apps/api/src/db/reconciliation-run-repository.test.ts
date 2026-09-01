@@ -155,6 +155,7 @@ describe("durable work-item claims", () => {
 
     const query = new PgDialect().sqlToQuery(execute.mock.calls[0]![0] as SQL);
     expect(query.sql).toContain("WHERE TRUE");
+    expect(query.sql).toContain("ORDER BY runs.created_at DESC, work.sequence_no");
     expect(query.params).not.toContain(undefined);
   });
 

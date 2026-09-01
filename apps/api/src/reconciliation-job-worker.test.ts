@@ -93,6 +93,26 @@ describe("reconciliation job worker", () => {
     expect(repo.completeWorkItem).toHaveBeenCalledOnce();
   });
 
+  it("claims globally even when recoverable-run discovery returns no rows", async () => {
+    let available = true;
+    const repo = repository(async () => available ? (available = false, item()) : undefined);
+    repo.getRecoverableRunIds = vi.fn(async () => []);
+    let processed!: () => void;
+    const didProcess = new Promise<void>((resolve) => { processed = resolve; });
+    const worker = createReconciliationJobWorker({
+      repository: repo,
+      owner: "worker",
+      pollIntervalMs: 1,
+      processWorkItem: async () => { processed(); worker.stop(); },
+    });
+
+    const running = worker.run();
+    await Promise.race([didProcess, new Promise<void>((_resolve, reject) => setTimeout(() => reject(new Error("work was never claimed")), 100))]);
+    await running;
+
+    expect(repo.claimWorkItem).toHaveBeenCalledWith({ runId: undefined, owner: "worker", leaseMs: 60_000 });
+  });
+
   it("logs a claimWorkItem failure with its stack before polling again", async () => {
     const failure = new Error("claim query failed");
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -112,38 +132,15 @@ describe("reconciliation job worker", () => {
     log.mockRestore();
   });
 
-  it("logs a getRecoverableRunIds failure with its stack before polling again", async () => {
-    const failure = new Error("recovery query failed");
-    const log = vi.spyOn(console, "error").mockImplementation(() => {});
-    const repo = repository(async () => undefined);
-    let attempts = 0;
+  it("claims a requested run with an explicit run ID", async () => {
     let worker!: ReturnType<typeof createReconciliationJobWorker>;
-    repo.getRecoverableRunIds = vi.fn(async () => {
-      attempts += 1;
-      if (attempts === 1) throw failure;
+    const repo = repository(async () => {
       worker.stop();
-      return [];
+      return undefined;
     });
     worker = createReconciliationJobWorker({ repository: repo, owner: "worker", pollIntervalMs: 1, processWorkItem: async () => {} });
 
-    await worker.run();
-
-    expect(log).toHaveBeenCalledWith("[reconciliation-worker] getRecoverableRunIds failed", failure);
-    log.mockRestore();
-  });
-
-  it("claims recoverable runs with an explicit run ID", async () => {
-    const repo = repository(async () => undefined);
-    let polls = 0;
-    let worker!: ReturnType<typeof createReconciliationJobWorker>;
-    repo.getRecoverableRunIds = vi.fn(async () => {
-      polls += 1;
-      if (polls > 1) worker.stop();
-      return polls === 1 ? ["run"] : [];
-    });
-    worker = createReconciliationJobWorker({ repository: repo, owner: "worker", pollIntervalMs: 1, processWorkItem: async () => {} });
-
-    await worker.run();
+    await worker.run("run");
 
     expect(repo.claimWorkItem).toHaveBeenCalledWith({ runId: "run", owner: "worker", leaseMs: 60_000 });
   });
