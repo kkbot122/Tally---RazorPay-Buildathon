@@ -121,6 +121,24 @@ describe("T030 dashboard workflows", () => {
     await waitFor(() => expect(api.cancelRun).toHaveBeenCalledWith("run_cancel"));
   });
 
+  it("does not resume a stopped run as active after reload", async () => {
+    api.createRun.mockResolvedValueOnce({ runId: "run_cancel", status: "PROCESSING" });
+    api.getRun.mockImplementation(() => new Promise(() => {}));
+    const firstPage = render(<Dashboard />);
+    fillForm();
+    fireEvent.submit(screen.getByRole("button", { name: "Run reconciliation" }).closest("form")!);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Stop run" })).toBeTruthy());
+
+    fireEvent.click(screen.getByRole("button", { name: "Stop run" }));
+    await waitFor(() => expect(api.cancelRun).toHaveBeenCalledWith("run_cancel"));
+    firstPage.unmount();
+    render(<Dashboard />);
+
+    expect(screen.queryByRole("button", { name: "Stop run" })).toBeNull();
+    expect(screen.getByText("Ready for a run")).toBeTruthy();
+    expect(window.localStorage.getItem("tally.activeRunId")).toBeNull();
+  });
+
   it("turns two immediate submissions into one POST and sends File.text contents", async () => {
     let resolveRun!: (value: { runId: string; status: "COMPLETED" }) => void;
     api.createRun.mockReturnValue(new Promise((resolve) => { resolveRun = resolve; }));

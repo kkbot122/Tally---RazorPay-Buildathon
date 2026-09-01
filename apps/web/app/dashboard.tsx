@@ -97,6 +97,7 @@ export default function Dashboard() {
   const [selectedResult, setSelectedResult] = useState<RunResult | null>(null);
   const submissionLock = useRef(createSubmissionLock());
   const resumeStarted = useRef(false);
+  const pollingRunId = useRef<string | null>(null);
   const selectedTriggerRef = useRef<HTMLButtonElement | null>(null);
 
   const filteredResults = useMemo(() => filterResults(results, filter), [filter, results]);
@@ -149,25 +150,28 @@ export default function Dashboard() {
     }
   }
 
-  async function waitForRun(runId: string) {
+  async function waitForRun(runId: string): Promise<boolean> {
     const deadline = Date.now() + 15 * 60 * 1000;
     while (true) {
+      if (pollingRunId.current !== runId) return false;
       const nextSummary = await getRun(runId);
+      if (pollingRunId.current !== runId) return false;
       setSummary(nextSummary);
       if (nextSummary.status === "FAILED") {
         throw Object.assign(new Error(`Run ${runId} failed operationally; no finance outcome was produced.`), { code: "RUN_FAILED" });
       }
       if (nextSummary.status === "COMPLETED") {
         await loadRunData(runId);
-        return;
+        return true;
       }
       if (nextSummary.status === "CANCELLED") {
         await loadRunData(runId);
         setStatusMessage("Run cancelled. Persisted results are shown as partial progress.");
-        return;
+        return true;
       }
       try {
         const partialResults = await getRunResults(runId);
+        if (pollingRunId.current !== runId) return false;
         setResults(partialResults);
         setHasLoadedRunData(true);
       } catch { /* Results may not exist until planning commits. */ }
@@ -184,10 +188,11 @@ export default function Dashboard() {
     if (persistedRunId === null) return;
 
     setActiveRunId(persistedRunId);
+    pollingRunId.current = persistedRunId;
     setIsRunning(true);
     setStatusMessage("Restoring the latest reconciliation run…");
     void waitForRun(persistedRunId)
-      .then(() => setStatusMessage(null))
+      .then((completed) => { if (completed) setStatusMessage(null); })
       .catch((runError: unknown) => {
         setReadError(errorCode(runError) === "RUN_FAILED"
           ? `Run ${persistedRunId} failed operationally; no finance outcome was produced.`
@@ -205,6 +210,12 @@ export default function Dashboard() {
     setStatusMessage("Cancellation requested…");
     try {
       await cancelRun(activeRunId);
+      pollingRunId.current = null;
+      window.localStorage.removeItem(activeRunStorageKey);
+      setIsRunning(false);
+      setReadError(null);
+      setReadErrorCode(undefined);
+      setStatusMessage("Cancellation requested. This run will not resume after reload.");
     } catch (cancelFailure) {
       setReadError(cancelFailure instanceof Error ? cancelFailure.message : "The run could not be cancelled.");
       setReadErrorCode(errorCode(cancelFailure));
@@ -234,12 +245,13 @@ export default function Dashboard() {
       const created = await createRun({ asOfDate, bankCsv, ledgerCsv });
       createdRunId = created.runId;
       window.localStorage.setItem(activeRunStorageKey, created.runId);
+      pollingRunId.current = created.runId;
       setActiveRunId(created.runId);
       setSummary({ runId: created.runId, status: created.status, totalCases: 0, reconciled: 0, explainedOutstanding: 0, discrepancies: 0, unresolved: 0 });
       setResults([]);
       setStatusMessage("Reconciliation accepted. Waiting for results…");
-      await waitForRun(created.runId);
-      setStatusMessage(null);
+      const completed = await waitForRun(created.runId);
+      if (completed) setStatusMessage(null);
     } catch (runError) {
       if (createdRunId !== null) {
         setReadError(errorCode(runError) === "RUN_FAILED"
