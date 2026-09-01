@@ -216,13 +216,17 @@ export function createReconciliationRunRepository(db: DatabaseClient): Reconcili
     async claimWorkItem({ runId, owner, leaseMs }) {
       if (!Number.isInteger(leaseMs) || leaseMs < 1) throw new Error("leaseMs must be a positive integer");
       const expiry = new Date(Date.now() + leaseMs);
+      // The postgres driver renders an undefined interpolation as an empty SQL
+      // fragment. The normal worker loop has no runId filter, so use TRUE
+      // instead of interpolating that undefined value.
+      const runScope = runId === undefined ? sql`TRUE` : sql`run_id = ${runId}`;
       const rows = await db.execute(sql`
         UPDATE reconciliation_work_items
         SET status = 'LEASED', lease_owner = ${owner}, lease_expires_at = ${expiry},
             attempt_count = attempt_count + 1, updated_at = now()
         WHERE work_item_id = (
           SELECT work_item_id FROM reconciliation_work_items
-          WHERE (${runId === undefined} OR run_id = ${runId})
+          WHERE ${runScope}
             AND (status = 'PENDING' OR (status = 'LEASED' AND lease_expires_at < now()))
             AND run_id IN (SELECT run_id FROM reconciliation_runs WHERE status IN ('PENDING', 'PROCESSING'))
           ORDER BY run_id, sequence_no

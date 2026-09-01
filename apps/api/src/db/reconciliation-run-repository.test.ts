@@ -1,6 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { PgDialect } from "drizzle-orm/pg-core";
+import type { SQL } from "drizzle-orm";
 
 import {
+  createReconciliationRunRepository,
   deriveVerificationColumns,
   validatePersistCompletedRunInput,
   type PersistCompletedRunInput,
@@ -127,5 +130,18 @@ describe("verification persistence projection", () => {
       result: { status: "REJECTED", diagnostics: { currency: "EUR/USD" } },
       failures: [{ code: "HARD_COMPATIBILITY_FAILED" }],
     })).toMatchObject({ currencyValid: false, directionValid: false });
+  });
+});
+
+describe("durable work-item claims", () => {
+  it("renders an unfiltered claim without interpolating an undefined run id", async () => {
+    const execute = vi.fn(async (_query: unknown) => []);
+    const repository = createReconciliationRunRepository({ execute } as never);
+
+    await repository.claimWorkItem!({ owner: "worker", leaseMs: 60_000 });
+
+    const query = new PgDialect().sqlToQuery(execute.mock.calls[0]![0] as SQL);
+    expect(query.sql).toContain("WHERE TRUE");
+    expect(query.params).not.toContain(undefined);
   });
 });
