@@ -45,12 +45,20 @@ export const DEFAULT_WORKER_CONFIGURATION = {
   completionTokenCap: 1_536,
 } as const;
 
+const GROQ_QUOTA_WAIT_SLICE_MS = 75_000;
+
 export function workerConfiguration(config: AppConfig) {
+  const concurrency = config.AI_WORKER_CONCURRENCY ?? DEFAULT_WORKER_CONFIGURATION.concurrency;
+  const sliceMs = config.AI_WORKER_SLICE_MS ?? DEFAULT_WORKER_CONFIGURATION.sliceMs;
+  // The free Groq budget is 8k TPM. A three-item batch reserves most of it,
+  // so concurrent workers only queue behind the shared limiter and repeatedly
+  // expire their 60-second slices before the next minute begins.
+  const constrainedGroq = config.AI_PROVIDER === "groq" && config.AI_GROQ_TOKENS_PER_MINUTE <= DEFAULT_GROQ_RATE_LIMIT.tokensPerMinute;
   return {
     pollIntervalMs: config.AI_WORKER_POLL_INTERVAL_MS ?? DEFAULT_WORKER_CONFIGURATION.pollIntervalMs,
-    concurrency: config.AI_WORKER_CONCURRENCY ?? DEFAULT_WORKER_CONFIGURATION.concurrency,
+    concurrency: constrainedGroq ? 1 : concurrency,
     leaseMs: config.AI_WORKER_LEASE_MS ?? DEFAULT_WORKER_CONFIGURATION.leaseMs,
-    sliceMs: config.AI_WORKER_SLICE_MS ?? DEFAULT_WORKER_CONFIGURATION.sliceMs,
+    sliceMs: constrainedGroq ? Math.max(sliceMs, GROQ_QUOTA_WAIT_SLICE_MS) : sliceMs,
     maxReasoningItemsPerRequest: config.AI_MAX_REASONING_ITEMS_PER_REQUEST ?? DEFAULT_WORKER_CONFIGURATION.maxReasoningItemsPerRequest,
     completionTokenCap: config.AI_REASONING_COMPLETION_TOKEN_CAP ?? DEFAULT_WORKER_CONFIGURATION.completionTokenCap,
   };

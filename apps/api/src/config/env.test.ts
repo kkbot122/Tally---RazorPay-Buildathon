@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { EnvSchema, loadConfig, useE2EDeterministicAdapter } from "./env.js";
+import { EnvSchema, loadConfig, useE2EDeterministicAdapter, workerConfiguration } from "./env.js";
 
 describe("API environment configuration", () => {
   it("provides safe local defaults", () => {
@@ -65,5 +65,9 @@ describe("API environment configuration", () => {
     expect(() => EnvSchema.parse({ TALLY_E2E_DETERMINISTIC_ADAPTER: "yes" })).toThrow();
     expect(useE2EDeterministicAdapter({ NODE_ENV: "test", TALLY_E2E_DETERMINISTIC_ADAPTER: "true" })).toBe(true);
     expect(useE2EDeterministicAdapter({ NODE_ENV: "production", TALLY_E2E_DETERMINISTIC_ADAPTER: "true" })).toBe(false);
+  });
+
+  it("serializes free-tier Groq worker requests across a full quota minute", () => {
+    expect(workerConfiguration(loadConfig({ AI_PROVIDER: "groq", AI_WORKER_CONCURRENCY: "4", AI_WORKER_SLICE_MS: "60000" }))).toMatchObject({ concurrency: 1, sliceMs: 75_000 });
   });
 });

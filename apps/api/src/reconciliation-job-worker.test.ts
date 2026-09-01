@@ -33,6 +33,20 @@ describe("reconciliation job worker", () => {
     expect(repo.completeWorkItem).not.toHaveBeenCalled();
   });
 
+  it("releases a slice even when provider work ignores cancellation", async () => {
+    const repo = repository(async () => item());
+    const worker = createReconciliationJobWorker({
+      repository: repo,
+      owner: "worker",
+      sliceMs: 1,
+      processWorkItem: async () => await new Promise<void>(() => {}),
+    });
+
+    await worker.runOnce();
+
+    expect(repo.releaseWorkItem).toHaveBeenCalledWith("run:work:1", "worker", "WORKER_SLICE_EXPIRED");
+  });
+
   it("aborts in-flight provider work when its run is cancelled", async () => {
     const repo = repository(async () => item());
     let entered!: () => void;

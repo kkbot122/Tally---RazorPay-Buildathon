@@ -130,8 +130,24 @@ export function createReconciliationRunService(
         const components = (snapshot.components ?? []).map((entry) => "promptInput" in entry
           ? entry as PlannedReasoningComponent
           : plan.components.find((component) => component.componentId === entry.componentId)).filter((component): component is PlannedReasoningComponent => component !== undefined);
+        const startedAt = Date.now();
+        await repository.appendOperationalTrace?.({
+          runId: workItem.runId,
+          type: "REASONING_BATCH_STARTED",
+          message: "Reasoning batch started.",
+          metadata: { workItemIds: [workItem.workItemId], batchSize: components.length },
+        });
         const processed = await processPlannedBatch({ runId: workItem.runId, asOfDate: input.asOfDate, components, modelAdapter, signal });
+        // Do not let a provider promise that outlived a released worker slice
+        // checkpoint results after another worker has reclaimed the item.
+        if (signal.aborted) return;
         await repository.persistResultCheckpoint!({ runId: workItem.runId, results: processed.results, trace: processed.trace.map(toPersistedTrace) });
+        await repository.appendOperationalTrace?.({
+          runId: workItem.runId,
+          type: "REASONING_BATCH_COMPLETED",
+          message: "Reasoning batch completed.",
+          metadata: { workItemIds: [workItem.workItemId], batchSize: components.length, durationMs: Date.now() - startedAt },
+        });
       },
     });
     void durableWorker.run();

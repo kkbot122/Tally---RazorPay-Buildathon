@@ -47,7 +47,10 @@ export function createReconciliationJobWorker(options: ReconciliationJobWorkerOp
     }, Math.max(1_000, Math.floor(leaseMs / 2)));
     options.onEvent?.({ type: "claimed", workItemId: item.workItemId, runId: item.runId });
     try {
-      await options.processWorkItem(item, controller.signal);
+      // A provider client can occasionally leave a socket promise pending even
+      // after receiving an AbortSignal. The worker lease must still end at the
+      // slice boundary so another attempt can make progress.
+      await abortable(options.processWorkItem(item, controller.signal), controller.signal);
       if (controller.signal.aborted) {
         await repository.releaseWorkItem!(item.workItemId, owner, "WORKER_SLICE_EXPIRED");
         options.onEvent?.({ type: "slice_yielded", workItemId: item.workItemId, runId: item.runId, durationMs: Date.now() - started });
@@ -96,6 +99,18 @@ export function createReconciliationJobWorker(options: ReconciliationJobWorkerOp
     abortRun(runId: string) { controllers.get(runId)?.forEach((controller) => controller.abort("RUN_CANCELLED")); },
     stop() { stopped = true; },
   };
+}
+
+function abortable(task: Promise<void>, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return Promise.reject(signal.reason);
+  return new Promise((resolve, reject) => {
+    const abort = () => reject(signal.reason);
+    signal.addEventListener("abort", abort, { once: true });
+    void task.then(
+      () => { signal.removeEventListener("abort", abort); resolve(); },
+      (error) => { signal.removeEventListener("abort", abort); reject(error); },
+    );
+  });
 }
 
 function positiveInt(value: number, name: string): number {
