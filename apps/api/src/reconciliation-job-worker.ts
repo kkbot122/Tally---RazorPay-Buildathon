@@ -10,6 +10,7 @@ export type ReconciliationJobWorkerOptions = {
   leaseMs?: number;
   sliceMs?: number;
   pollIntervalMs?: number;
+  isRetryableError?: (error: unknown, item: ReconciliationWorkItem) => boolean;
   onEvent?: (event: { type: "claimed" | "completed" | "failed" | "released" | "slice_yielded"; workItemId?: string; runId?: string; durationMs?: number; classification?: string }) => void | Promise<void>;
 };
 
@@ -64,8 +65,13 @@ export function createReconciliationJobWorker(options: ReconciliationJobWorkerOp
         await options.onEvent?.({ type: "slice_yielded", workItemId: item.workItemId, runId: item.runId, durationMs: Date.now() - started });
       } else {
         const classification = error instanceof Error ? error.name : "UNKNOWN";
-        await repository.failWorkItem!(item.workItemId, owner, classification);
-        await options.onEvent?.({ type: "failed", workItemId: item.workItemId, runId: item.runId, durationMs: Date.now() - started, classification });
+        if (options.isRetryableError?.(error, item) === true) {
+          await repository.releaseWorkItem!(item.workItemId, owner, "TRANSIENT_PROVIDER_RATE_LIMIT");
+          await options.onEvent?.({ type: "released", workItemId: item.workItemId, runId: item.runId, durationMs: Date.now() - started, classification: "TRANSIENT_PROVIDER_RATE_LIMIT" });
+        } else {
+          await repository.failWorkItem!(item.workItemId, owner, classification);
+          await options.onEvent?.({ type: "failed", workItemId: item.workItemId, runId: item.runId, durationMs: Date.now() - started, classification });
+        }
       }
     } finally {
       clearTimeout(timer);

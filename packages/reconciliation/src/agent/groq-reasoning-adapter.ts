@@ -84,6 +84,7 @@ export class GroqReasoningAdapter implements ReasoningModelAdapter {
       } catch (error) {
         if (providerRequestStarted) await input.onOperationalEvent?.("PROVIDER_REQUEST_COMPLETED", { durationMs: Date.now() - startedAt, outcome: "FAILED" });
         const classified = classifyProviderError(error);
+        if (classified.category === "RATE_LIMIT") await this.groqRateLimiter!.blockFor(rateLimitWaitMs(error));
         throw new ReasoningAdapterError("AI_REQUEST_ERROR", "The Groq reasoning request failed.", {
           cause: error,
           diagnostics: {
@@ -175,6 +176,24 @@ function quotaDimension(error: unknown): "RPM" | "TPM" | "RPD" | "TPD" | undefin
   if (header(error, "x-ratelimit-remaining-tokens-day") === "0") return "TPD";
   if (header(error, "x-ratelimit-remaining-requests-day") === "0") return "RPD";
   return undefined;
+}
+
+function rateLimitWaitMs(error: unknown): number {
+  const retryAfter = header(error, "retry-after");
+  if (retryAfter !== null) {
+    const seconds = Number(retryAfter);
+    if (Number.isFinite(seconds) && seconds > 0) return Math.ceil(seconds * 1_000);
+  }
+  for (const name of ["x-ratelimit-reset-tokens", "x-ratelimit-reset-requests"]) {
+    const reset = header(error, name)?.trim();
+    const match = reset?.match(/^(\d+(?:\.\d+)?)(ms|s|m)$/i);
+    if (match !== null && match !== undefined) {
+      const value = Number(match[1]);
+      const multiplier = match[2]!.toLowerCase() === "ms" ? 1 : match[2]!.toLowerCase() === "m" ? 60_000 : 1_000;
+      return Math.ceil(value * multiplier);
+    }
+  }
+  return 60_000;
 }
 
 function estimateRequestTokens(instruction: string, retryFeedback: string | undefined): number {

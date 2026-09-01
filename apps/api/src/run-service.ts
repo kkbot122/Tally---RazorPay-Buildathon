@@ -152,11 +152,16 @@ export function createReconciliationRunService(
       leaseMs: workerConfiguration.leaseMs ?? Math.max(runDeadlineMs * 2, 60_000),
       sliceMs: workerConfiguration.sliceMs ?? runDeadlineMs,
       pollIntervalMs: workerConfiguration.pollIntervalMs ?? 1_000,
+      isRetryableError: (error, item) => error instanceof ReasoningAdapterError
+        && error.diagnostics?.category === "RATE_LIMIT"
+        && error.diagnostics.rateLimitDimension !== "RPD"
+        && error.diagnostics.rateLimitDimension !== "TPD"
+        && item.attemptCount < 3,
       onEvent: (event) => {
         if (event.runId === undefined || repository.appendOperationalTrace === undefined) return;
         const type = ({ claimed: "WORK_ITEM_CLAIMED", completed: "WORK_ITEM_COMPLETED", failed: "WORK_ITEM_FAILED", released: "WORK_ITEM_RELEASED", slice_yielded: "WORKER_SLICE_YIELDED" } as const)[event.type];
         return (async () => {
-          await repository.appendOperationalTrace!({ runId: event.runId!, type, message: `Reconciliation work item ${event.type}.`, metadata: { workItemId: event.workItemId, durationMs: event.durationMs, classification: event.classification } });
+          await repository.appendOperationalTrace!({ runId: event.runId!, type, message: `Reconciliation work item ${event.type}.`, metadata: { workItemId: event.workItemId, durationMs: event.durationMs, classification: event.classification, reason: event.type === "released" ? event.classification : undefined } });
           if (event.type === "completed") await finalizeDurableRun(event.runId!);
           if (event.type === "failed") {
             // A failed work item has no verified terminal result. Mark the run

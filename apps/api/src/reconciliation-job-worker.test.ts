@@ -70,6 +70,39 @@ describe("reconciliation job worker", () => {
     expect(repo.releaseWorkItem).toHaveBeenCalledWith("run:work:1", "worker", "WORKER_SLICE_EXPIRED");
   });
 
+  it("releases a transient provider rate limit instead of failing the run", async () => {
+    const repo = repository(async () => item());
+    const rateLimit = Object.assign(new Error("rate limited"), { diagnostics: { category: "RATE_LIMIT" } });
+    const worker = createReconciliationJobWorker({
+      repository: repo,
+      owner: "worker",
+      isRetryableError: (error) => (error as typeof rateLimit).diagnostics?.category === "RATE_LIMIT",
+      processWorkItem: async () => { throw rateLimit; },
+    });
+
+    await worker.runOnce();
+
+    expect(repo.releaseWorkItem).toHaveBeenCalledWith("run:work:1", "worker", "TRANSIENT_PROVIDER_RATE_LIMIT");
+    expect(repo.failWorkItem).not.toHaveBeenCalled();
+  });
+
+  it("fails a repeatedly rate-limited item after its bounded retry attempts", async () => {
+    const exhausted = { ...item(), attemptCount: 3 };
+    const repo = repository(async () => exhausted);
+    const rateLimit = Object.assign(new Error("rate limited"), { diagnostics: { category: "RATE_LIMIT" } });
+    const worker = createReconciliationJobWorker({
+      repository: repo,
+      owner: "worker",
+      isRetryableError: (_error, workItem) => workItem.attemptCount < 3,
+      processWorkItem: async () => { throw rateLimit; },
+    });
+
+    await worker.runOnce();
+
+    expect(repo.failWorkItem).toHaveBeenCalledWith("run:work:1", "worker", "Error");
+    expect(repo.releaseWorkItem).not.toHaveBeenCalled();
+  });
+
   it("keeps polling after a claim failure", async () => {
     let attempts = 0;
     const repo = repository(async () => {

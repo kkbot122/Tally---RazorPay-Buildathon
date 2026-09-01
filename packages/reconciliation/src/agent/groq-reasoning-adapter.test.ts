@@ -78,6 +78,22 @@ describe("GroqReasoningAdapter", () => {
     await expect(adapter.generateProposal({ input: "input" })).rejects.toMatchObject({ diagnostics: { category: "RATE_LIMIT", rateLimitDimension: "TPM" } });
   });
 
+  it("shares Groq's retry window after a 429 response", async () => {
+    const providerError = Object.assign(new Error("rate limited"), {
+      status: 429,
+      headers: new Headers({ "retry-after": "2" }),
+    });
+    const blockFor = vi.fn(async () => undefined);
+    const adapter = new GroqReasoningAdapter({
+      client: { create: vi.fn().mockRejectedValue(providerError) } as never,
+      groqRateLimiter: { reserve: vi.fn(async () => ({ reservationId: "r", requests: 1, tokens: 100 })), settle: vi.fn(), blockFor } as never,
+    });
+
+    await expect(adapter.generateProposal({ input: "input" })).rejects.toMatchObject({ diagnostics: { category: "RATE_LIMIT" } });
+
+    expect(blockFor).toHaveBeenCalledWith(2_000);
+  });
+
   it("sends Groq-compatible JSON requests with the configured model and cancellation", async () => {
     const create = vi.fn().mockResolvedValue({ choices: [{ message: { content: JSON.stringify(proposal) } }], usage: { total_tokens: 700 } });
     const signal = new AbortController().signal;
