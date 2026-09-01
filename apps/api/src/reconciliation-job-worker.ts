@@ -88,15 +88,20 @@ export function createReconciliationJobWorker(options: ReconciliationJobWorkerOp
   async function run(runId?: string): Promise<void> {
     while (!stopped) {
       let count = 0;
+      let stage: "getRecoverableRunIds" | "claimWorkItem" = runId === undefined && repository.getRecoverableRunIds !== undefined
+        ? "getRecoverableRunIds"
+        : "claimWorkItem";
       try {
         if (runId !== undefined || repository.getRecoverableRunIds === undefined) {
           count = await runOnce(runId);
         } else {
           for (const recoverableRunId of await repository.getRecoverableRunIds()) {
+            stage = "claimWorkItem";
             count += await runOnce(recoverableRunId);
           }
         }
-      } catch {
+      } catch (error) {
+        console.error(`[reconciliation-worker] ${stage} failed`, error);
         // A transient database failure must not silently kill the durable
         // worker; the next poll can reclaim the pending item.
       }

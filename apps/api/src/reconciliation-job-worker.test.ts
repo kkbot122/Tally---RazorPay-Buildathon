@@ -66,6 +66,45 @@ describe("reconciliation job worker", () => {
     expect(repo.completeWorkItem).toHaveBeenCalledOnce();
   });
 
+  it("logs a claimWorkItem failure with its stack before polling again", async () => {
+    const failure = new Error("claim query failed");
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    let attempts = 0;
+    let worker!: ReturnType<typeof createReconciliationJobWorker>;
+    const repo = repository(async () => {
+      attempts += 1;
+      if (attempts === 1) throw failure;
+      worker.stop();
+      return undefined;
+    });
+    worker = createReconciliationJobWorker({ repository: repo, owner: "worker", pollIntervalMs: 1, processWorkItem: async () => {} });
+
+    await worker.run("run");
+
+    expect(log).toHaveBeenCalledWith("[reconciliation-worker] claimWorkItem failed", failure);
+    log.mockRestore();
+  });
+
+  it("logs a getRecoverableRunIds failure with its stack before polling again", async () => {
+    const failure = new Error("recovery query failed");
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const repo = repository(async () => undefined);
+    let attempts = 0;
+    let worker!: ReturnType<typeof createReconciliationJobWorker>;
+    repo.getRecoverableRunIds = vi.fn(async () => {
+      attempts += 1;
+      if (attempts === 1) throw failure;
+      worker.stop();
+      return [];
+    });
+    worker = createReconciliationJobWorker({ repository: repo, owner: "worker", pollIntervalMs: 1, processWorkItem: async () => {} });
+
+    await worker.run();
+
+    expect(log).toHaveBeenCalledWith("[reconciliation-worker] getRecoverableRunIds failed", failure);
+    log.mockRestore();
+  });
+
   it("claims recoverable runs with an explicit run ID", async () => {
     const repo = repository(async () => undefined);
     let polls = 0;
