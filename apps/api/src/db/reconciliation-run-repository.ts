@@ -244,23 +244,23 @@ export function createReconciliationRunRepository(db: DatabaseClient): Reconcili
       const result = await db.update(reconciliationWorkItems).set({
         status: "PENDING", leaseOwner: null, leaseExpiresAt: null,
         lastFailureClassification: reason ?? null, updatedAt: new Date(),
-      }).where(sql`${reconciliationWorkItems.workItemId} = ${workItemId} AND ${reconciliationWorkItems.leaseOwner} = ${owner} AND ${reconciliationWorkItems.status} = 'LEASED'`);
+      }).where(sql`${reconciliationWorkItems.workItemId} = ${workItemId} AND ${reconciliationWorkItems.leaseOwner} = ${owner} AND ${reconciliationWorkItems.status} = 'LEASED'`).returning({ workItemId: reconciliationWorkItems.workItemId });
       if (result.length > 0) await refreshWorkProgress(db, workItemId);
       return result.length > 0;
     },
     async completeWorkItem(workItemId, owner) {
-      const result = await db.update(reconciliationWorkItems).set({ status: "COMPLETED", leaseOwner: null, leaseExpiresAt: null, updatedAt: new Date() }).where(sql`${reconciliationWorkItems.workItemId} = ${workItemId} AND ${reconciliationWorkItems.leaseOwner} = ${owner} AND ${reconciliationWorkItems.status} = 'LEASED'`);
+      const result = await db.update(reconciliationWorkItems).set({ status: "COMPLETED", leaseOwner: null, leaseExpiresAt: null, updatedAt: new Date() }).where(sql`${reconciliationWorkItems.workItemId} = ${workItemId} AND ${reconciliationWorkItems.leaseOwner} = ${owner} AND ${reconciliationWorkItems.status} = 'LEASED'`).returning({ workItemId: reconciliationWorkItems.workItemId });
       if (result.length > 0) await refreshWorkProgress(db, workItemId);
       return result.length > 0;
     },
     async failWorkItem(workItemId, owner, classification) {
-      const result = await db.update(reconciliationWorkItems).set({ status: "FAILED", leaseOwner: null, leaseExpiresAt: null, lastFailureClassification: classification, updatedAt: new Date() }).where(sql`${reconciliationWorkItems.workItemId} = ${workItemId} AND ${reconciliationWorkItems.leaseOwner} = ${owner} AND ${reconciliationWorkItems.status} = 'LEASED'`);
+      const result = await db.update(reconciliationWorkItems).set({ status: "FAILED", leaseOwner: null, leaseExpiresAt: null, lastFailureClassification: classification, updatedAt: new Date() }).where(sql`${reconciliationWorkItems.workItemId} = ${workItemId} AND ${reconciliationWorkItems.leaseOwner} = ${owner} AND ${reconciliationWorkItems.status} = 'LEASED'`).returning({ workItemId: reconciliationWorkItems.workItemId });
       if (result.length > 0) await refreshWorkProgress(db, workItemId);
       return result.length > 0;
     },
     async cancelRunDurably(runId) {
       return db.transaction(async (tx) => {
-        const result = await tx.update(reconciliationRuns).set({ status: "CANCELLED", completedAt: new Date() }).where(sql`${reconciliationRuns.runId} = ${runId} AND ${reconciliationRuns.status} IN ('PENDING', 'PROCESSING')`);
+        const result = await tx.update(reconciliationRuns).set({ status: "CANCELLED", completedAt: new Date() }).where(sql`${reconciliationRuns.runId} = ${runId} AND ${reconciliationRuns.status} IN ('PENDING', 'PROCESSING')`).returning({ runId: reconciliationRuns.runId });
         if (result.length === 0) return false;
         await tx.update(reconciliationWorkItems).set({ status: "CANCELLED", leaseOwner: null, leaseExpiresAt: null, updatedAt: new Date() }).where(sql`${reconciliationWorkItems.runId} = ${runId} AND ${reconciliationWorkItems.status} IN ('PENDING', 'LEASED')`);
         await refreshRunWorkProgress(tx, runId);
@@ -271,7 +271,7 @@ export function createReconciliationRunRepository(db: DatabaseClient): Reconcili
       await db.update(reconciliationRuns).set({ status: "PROCESSING", startedAt: new Date() }).where(sql`${reconciliationRuns.runId} = ${runId} AND ${reconciliationRuns.status} = 'PENDING'`);
     },
     async renewWorkItem(workItemId, owner, leaseMs) {
-      const result = await db.update(reconciliationWorkItems).set({ leaseExpiresAt: new Date(Date.now() + leaseMs), updatedAt: new Date() }).where(sql`${reconciliationWorkItems.workItemId} = ${workItemId} AND ${reconciliationWorkItems.leaseOwner} = ${owner} AND ${reconciliationWorkItems.status} = 'LEASED'`);
+      const result = await db.update(reconciliationWorkItems).set({ leaseExpiresAt: new Date(Date.now() + leaseMs), updatedAt: new Date() }).where(sql`${reconciliationWorkItems.workItemId} = ${workItemId} AND ${reconciliationWorkItems.leaseOwner} = ${owner} AND ${reconciliationWorkItems.status} = 'LEASED'`).returning({ workItemId: reconciliationWorkItems.workItemId });
       return result.length > 0;
     },
     async enqueueRunWorkItem(input) {
@@ -307,7 +307,7 @@ export function createReconciliationRunRepository(db: DatabaseClient): Reconcili
         snapshot: component, candidateSnapshot: component.candidateSet,
       })), { maxItemsPerBatch: options?.maxItemsPerBatch ?? 3, maxCandidates: 12 });
       await db.transaction(async (tx) => {
-        const updated = await tx.update(reconciliationRuns).set({ status: "PROCESSING", startedAt: new Date(plan.trace[0]?.occurredAt ?? Date.now()), totalBankRecords: plan.bankRecords.length, totalLedgerRecords: plan.ledgerRecords.length, totalWorkItems: batches.length, configuration: { asOfDate: plan.asOfDate, planned: true } }).where(sql`${reconciliationRuns.runId} = ${plan.runId} AND ${reconciliationRuns.status} IN ('PENDING', 'PROCESSING')`);
+        const updated = await tx.update(reconciliationRuns).set({ status: "PROCESSING", startedAt: new Date(plan.trace[0]?.occurredAt ?? Date.now()), totalBankRecords: plan.bankRecords.length, totalLedgerRecords: plan.ledgerRecords.length, totalWorkItems: batches.length, configuration: { asOfDate: plan.asOfDate, planned: true } }).where(sql`${reconciliationRuns.runId} = ${plan.runId} AND ${reconciliationRuns.status} IN ('PENDING', 'PROCESSING')`).returning({ runId: reconciliationRuns.runId });
         if (updated.length === 0) return;
         if (plan.deterministicResults.length > 0) {
           await tx.insert(reconciliationResults).values(plan.deterministicResults.map((result, index) => mapResultRow(plan.runId, result, index, new Map(), new Map()))).onConflictDoNothing();

@@ -1,5 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
+import { planReconciliation } from "@tally/reconciliation";
 
 import { createDatabase } from "./client.js";
 import {
@@ -168,5 +169,23 @@ describeDatabase("PostgreSQL reconciliation persistence", () => {
       insert into trace_events (event_id, run_id, case_id, type, sequence_no, occurred_at, message, metadata)
       values (${`${input.runId}:duplicate`}, ${input.runId}, null, 'RUN_COMPLETED', 1, now(), 'duplicate', '{}'::jsonb)
     `).rejects.toThrow();
+  });
+
+  it("persists and claims planned durable work", async () => {
+    const runId = testRunId("durable-work");
+    runIds.push(runId);
+    const bankCsv = "bank_txn_id,booking_date,value_date,amount,currency,direction,reference,counterparty,description,batch_id\nB1,2026-08-23,2026-08-23,100,INR,CREDIT,REF-1,ACME,Payment,";
+    const ledgerCsv = "ledger_txn_id,accounting_date,maturity_date,amount,currency,direction,reference,counterparty,description,source,batch_id\nL1,2026-08-23,,99,INR,CREDIT,REF-1,ACME,Payment,ERP,";
+    await repository.startRun({ runId, asOfDate: "2026-08-23", bankCsv, ledgerCsv });
+
+    const plan = planReconciliation({ runId, asOfDate: "2026-08-23", bankCsv, ledgerCsv });
+    expect(plan.components.length).toBeGreaterThan(0);
+    await repository.persistPlan!(plan);
+
+    await expect(repository.getRunById(runId)).resolves.toMatchObject({ status: "PROCESSING", pendingWorkItems: 1 });
+    const claimed = await repository.claimWorkItem!({ runId, owner: "test-worker", leaseMs: 60_000 });
+    expect(claimed).toMatchObject({ runId, status: "LEASED" });
+    expect(await repository.completeWorkItem!(claimed!.workItemId, "test-worker")).toBe(true);
+    await expect(repository.getRunById(runId)).resolves.toMatchObject({ completedWorkItems: 1, pendingWorkItems: 0 });
   });
 });
