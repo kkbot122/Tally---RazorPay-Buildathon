@@ -574,10 +574,31 @@ async function generateProposalWithVerifierRetry(
   onProviderRequestStart?: () => void,
   onOperationalEvent?: ReasoningModelInput["onOperationalEvent"],
 ): Promise<AgentProposal> {
-  let proposal = await requestProposal({ ...item.promptInput, signal, onProviderRequestStart, onOperationalEvent });
+  let structuredOutputRetryUsed = false;
+  let proposal: AgentProposal;
+  try {
+    proposal = await requestProposal({ ...item.promptInput, signal, onProviderRequestStart, onOperationalEvent });
+  } catch (error) {
+    if (!isStructuredOutputGenerationError(error)) throw error;
+    structuredOutputRetryUsed = true;
+    trace.record({ type: "REPAIR_STARTED", payload: { caseId: item.caseId, repairAttempt: 1 } });
+    onRepair?.();
+    try {
+      proposal = await requestProposal({
+        ...item.promptInput,
+        retryFeedback: JSON.stringify({ providerFailure: "STRUCTURED_OUTPUT_GENERATION_FAILED", instruction: "Return a proposal matching the required schema." }),
+        signal,
+        onProviderRequestStart,
+        onOperationalEvent,
+      });
+    } catch (retryError) {
+      if (!isStructuredOutputGenerationError(retryError)) throw retryError;
+      proposal = insufficientEvidenceProposal(item.primary, "STRUCTURED_OUTPUT_GENERATION_FAILED");
+    }
+  }
   trace.record({ type: "AGENT_PROPOSED", caseId: item.caseId, payload: proposal });
 
-  for (let attempt = 0; attempt < 1; attempt += 1) {
+  for (let attempt = 0; attempt < (structuredOutputRetryUsed ? 0 : 1); attempt += 1) {
     const verification = verifyAgentProposal(item, proposal, records, asOfDate, usedRecords);
     if (verification.status !== "REJECTED" || !verification.failures.some((failure) => isRepairableModelFailure(failure.code))) return proposal;
     trace.record({ type: "VERIFICATION_CHECKED", caseId: item.caseId, payload: verificationPayload(verification) });
@@ -598,6 +619,14 @@ async function generateProposalWithVerifierRetry(
     trace.record({ type: "AGENT_PROPOSED", caseId: item.caseId, payload: proposal });
   }
   return proposal;
+}
+
+function isStructuredOutputGenerationError(error: unknown): error is ReasoningAdapterError {
+  if (!(error instanceof ReasoningAdapterError)
+    || error.code !== "AI_REQUEST_ERROR"
+    || error.diagnostics?.category !== "VALIDATION"
+    || error.diagnostics.status !== 400) return false;
+  return /failed.*generat|structured output|json/i.test(error.diagnostics.errorMessage ?? "");
 }
 
 function pruneCandidatesForReasoning(candidateSet: CandidateSet): { candidateSet: CandidateSet; prunedCount: number } {
