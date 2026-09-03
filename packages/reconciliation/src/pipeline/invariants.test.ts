@@ -313,6 +313,30 @@ describe("T034 core engine safety invariants", () => {
     expect(processed.result).toMatchObject({ outcome: "UNRESOLVED", reasonCode: "INSUFFICIENT_EVIDENCE" });
   });
 
+  it("leaves the investigation unresolved when its verifier repair gets a structured-output 400", async () => {
+    const plan = planReconciliation({
+      runId: "run-structured-output-repair-failure",
+      asOfDate: "2026-08-23",
+      bankCsv: bankCsv([{ id: "B1", reference: "BANK-1", counterparty: "Bank One" }]),
+      ledgerCsv: ledgerCsv([{ id: "L1", reference: "LEDGER-1", counterparty: "Ledger One" }]),
+    });
+    let calls = 0;
+    const modelAdapter: ReasoningModelAdapter = {
+      generateProposal: async () => {
+        calls += 1;
+        if (calls === 1) return proposalFor("B1", ["UNKNOWN"]);
+        throw new ReasoningAdapterError("AI_REQUEST_ERROR", "The Groq reasoning request failed.", {
+          diagnostics: { category: "VALIDATION", status: 400, errorMessage: "Failed to generate JSON matching the schema." },
+        });
+      },
+    };
+
+    const processed = await processPlannedComponent({ runId: plan.runId, asOfDate: plan.asOfDate, component: plan.components[0]!, modelAdapter });
+
+    expect(calls).toBe(2);
+    expect(processed.result).toMatchObject({ outcome: "UNRESOLVED", reasonCode: "INSUFFICIENT_EVIDENCE" });
+  });
+
   it("rejects reconciliation when currencies differ", async () => {
     const result = await runCase(
       [{ id: "B1", currency: "INR" }],

@@ -609,13 +609,18 @@ async function generateProposalWithVerifierRetry(
     }));
     trace.record({ type: "REPAIR_STARTED", payload: { caseId: item.caseId, repairAttempt: attempt + 1 } });
     onRepair?.();
-    proposal = await requestProposal({
-      ...item.promptInput,
-      retryFeedback: JSON.stringify({ caseId: item.caseId, proposedBankRecordIds: proposal.bankRecordIds, proposedLedgerRecordIds: proposal.ledgerRecordIds, verifierFailures: feedback }),
-      signal,
-      onProviderRequestStart,
-      onOperationalEvent,
-    });
+    try {
+      proposal = await requestProposal({
+        ...item.promptInput,
+        retryFeedback: JSON.stringify({ caseId: item.caseId, proposedBankRecordIds: proposal.bankRecordIds, proposedLedgerRecordIds: proposal.ledgerRecordIds, verifierFailures: feedback }),
+        signal,
+        onProviderRequestStart,
+        onOperationalEvent,
+      });
+    } catch (error) {
+      if (!isStructuredOutputGenerationError(error)) throw error;
+      proposal = insufficientEvidenceProposal(item.primary, "STRUCTURED_OUTPUT_GENERATION_FAILED");
+    }
     trace.record({ type: "AGENT_PROPOSED", caseId: item.caseId, payload: proposal });
   }
   return proposal;
