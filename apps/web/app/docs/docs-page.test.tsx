@@ -1,6 +1,7 @@
 /** @vitest-environment jsdom */
 
 import { cleanup, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import React from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import DocsContent from "./docs-content";
@@ -56,5 +57,40 @@ describe("documentation page", () => {
       expect(href?.startsWith("#")).toBe(true);
       expect(document.getElementById(href!.slice(1))).toBeTruthy();
     }
+  });
+
+  it("lets readers select each architecture system and inspect its detail panel", async () => {
+    const user = userEvent.setup();
+    render(<DocsContent />);
+
+    expect(screen.getAllByRole("button")).toHaveLength(9);
+    expect(screen.getByRole("heading", { name: "Bank CSV + Ledger CSV", level: 3 })).toBeTruthy();
+
+    const validationButton = screen.getByRole("button", { name: /02 CSV validation/ });
+    await user.click(validationButton);
+
+    expect(validationButton.getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("heading", { name: "CSV validation", level: 3 })).toBeTruthy();
+    expect(screen.getByText("The parser checks required headers, row shape, dates, amounts, currency, direction, and identifiers before the data can enter the pipeline.")).toBeTruthy();
+
+    expect(screen.getByRole("heading", { name: "Complete high-level design", level: 3 })).toBeTruthy();
+  });
+
+  it("keeps the high-level design in Frozen scope without the old code block", () => {
+    render(<DocsContent />);
+
+    const frozenScope = screen.getByRole("heading", { name: "Frozen scope" }).closest("section");
+    expect(frozenScope?.querySelector("h3")?.textContent).toBe("Complete high-level design");
+    expect(screen.queryByText(/collect → validate \/ parse/)).toBeNull();
+  });
+
+  it("places the table of contents in the left desktop grid column", () => {
+    render(<DocsContent />);
+
+    const navigation = screen.getByRole("navigation", { name: "On this page" });
+    expect(navigation.closest("aside")?.className).toContain("lg:col-start-1");
+    expect(navigation.closest("aside")?.className).toContain("lg:sticky");
+    expect(navigation.closest("aside")?.className).toContain("lg:top-[68px]");
+    expect(navigation.closest("main")?.className).toContain("lg:grid-cols-[220px_minmax(0,760px)]");
   });
 });

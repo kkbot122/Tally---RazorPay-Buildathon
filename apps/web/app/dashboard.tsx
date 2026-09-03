@@ -273,7 +273,7 @@ export default function Dashboard() {
   return (
     <div className="min-h-screen">
       <header className="flex min-h-[52px] flex-wrap items-center gap-x-4 border-b border-tally-border bg-tally-surface px-4 sm:h-[52px] sm:flex-nowrap sm:px-6">
-        <a className="inline-flex items-center gap-[9px] text-[15px] font-semibold tracking-[-.01em] text-tally-ink no-underline" href="/" aria-label="Tally dashboard"><span className="grid size-5 place-items-center rounded border border-tally-ink text-[11px] font-bold">T</span><span>Tally</span></a>
+        <a className="inline-flex items-center gap-[9px] text-[15px] font-semibold tracking-[-.01em] text-tally-ink no-underline" href="/" aria-label="Tally dashboard"><img src="/tally-logo.png" alt="" aria-hidden="true" className="size-5 shrink-0 object-contain" /><span>Tally</span></a>
         <nav className="order-3 flex h-10 w-full gap-4 sm:order-none sm:ml-8 sm:h-full sm:w-auto sm:gap-5" aria-label="Primary navigation">
           <a className="inline-flex items-center border-b-2 border-tally-accent font-semibold text-[13px] text-tally-ink no-underline" href="/">Dashboard</a>
           <a className="inline-flex items-center border-b-2 border-transparent text-[13px] text-tally-ink-muted no-underline" href="/trace">Trace</a>
