@@ -13,6 +13,40 @@ export const DEFAULT_GROQ_REASONING_MODEL = "openai/gpt-oss-120b";
 export const MAX_GROQ_REASONING_COMPLETION_TOKENS = 1536;
 
 const GROQ_BASE_URL = "https://api.groq.com/openai/v1";
+const PROPOSAL_RESPONSE_FORMAT = {
+  type: "json_schema",
+  json_schema: {
+    name: "reconciliation_proposal",
+    strict: true,
+    schema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["proposedOutcome", "bankRecordIds", "ledgerRecordIds", "confidence", "evidence", "conflictingEvidence", "reason"],
+      properties: {
+        proposedOutcome: { type: "string", enum: ["MATCH", "TIMING_DIFFERENCE", "DISCREPANCY", "INSUFFICIENT_EVIDENCE"] },
+        bankRecordIds: { type: "array", items: { type: "string" } },
+        ledgerRecordIds: { type: "array", items: { type: "string" } },
+        confidence: { type: "string", enum: ["HIGH", "MEDIUM", "LOW"] },
+        evidence: { type: "array", items: { $ref: "#/$defs/evidence" } },
+        conflictingEvidence: { type: "array", items: { $ref: "#/$defs/evidence" } },
+        reason: { type: "string" },
+      },
+      $defs: {
+        evidence: {
+          type: "object",
+          additionalProperties: false,
+          required: ["statement", "source", "kind", "recordIds"],
+          properties: {
+            statement: { type: "string" },
+            source: { type: "string", enum: ["BANK_RECORD", "LEDGER_RECORD", "CROSS_RECORD", "DETERMINISTIC"] },
+            kind: { type: "string", enum: ["AMOUNT", "REFERENCE", "COUNTERPARTY", "DESCRIPTION", "BATCH", "DATE", "GROUPING", "SEMANTIC", "DETERMINISTIC"] },
+            recordIds: { type: "array", items: { type: "string" } },
+          },
+        },
+      },
+    },
+  },
+} as const;
 const PROPOSAL_FORMAT = `
 Return one JSON object only (no wrapper, no snake_case):
 { proposedOutcome, bankRecordIds, ledgerRecordIds, confidence, evidence, conflictingEvidence, reason }.
@@ -72,7 +106,7 @@ export class GroqReasoningAdapter implements ReasoningModelAdapter {
             { role: "system", content: PROPOSAL_FORMAT },
             { role: "user", content: input.retryFeedback === undefined ? instruction : `${instruction}\n\nVERIFIER FEEDBACK FOR THIS REPAIR ATTEMPT:\n${input.retryFeedback}` },
           ],
-          response_format: { type: "json_object" },
+          response_format: PROPOSAL_RESPONSE_FORMAT,
           temperature: 0,
           max_completion_tokens: this.maxCompletionTokens,
         };

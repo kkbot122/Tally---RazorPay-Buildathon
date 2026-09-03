@@ -100,7 +100,15 @@ describe("GroqReasoningAdapter", () => {
     const adapter = new GroqReasoningAdapter({ model: "groq-test", client: { create } as never });
 
     await expect(adapter.generateProposal({ input: "input", signal })).resolves.toEqual(proposal);
-    expect(create.mock.calls[0]![0]).toEqual(expect.objectContaining({ model: "groq-test", response_format: { type: "json_object" }, temperature: 0, max_completion_tokens: 1536 }));
+    expect(create.mock.calls[0]![0]).toEqual(expect.objectContaining({
+      model: "groq-test",
+      response_format: expect.objectContaining({
+        type: "json_schema",
+        json_schema: expect.objectContaining({ name: "reconciliation_proposal", strict: true }),
+      }),
+      temperature: 0,
+      max_completion_tokens: 1536,
+    }));
     expect((create.mock.calls[0]![0] as Record<string, unknown>).chat_template_kwargs).toBeUndefined();
     expect(create.mock.calls[0]![1]).toEqual({ signal });
   });
