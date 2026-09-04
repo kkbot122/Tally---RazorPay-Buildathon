@@ -14,7 +14,9 @@ const PILOT_CASE_COUNTS: Readonly<Record<BenchmarkCaseCategory, number>> = {
   TIMING: 5,
   GROUPED_ONE_TO_MANY: 4,
   GROUPED_MANY_TO_ONE: 4,
-  DISCREPANCY: 5,
+  // Include every final-profile discrepancy variant: amount, conflicting records,
+  // and duplicate record usage.
+  DISCREPANCY: 10,
   AMBIGUOUS: 3,
   NO_CANDIDATE: 2,
 };
@@ -70,6 +72,6 @@ function selectCases(allCases: readonly BenchmarkCase[]): BenchmarkCase[] {
     .filter((benchmarkCase) => benchmarkCase.category === category)
     .slice(0, count));
 
-  if (selected.length !== 50) throw new Error(`Expected 50 pilot cases, found ${selected.length}`);
+  if (selected.length !== 55) throw new Error(`Expected 55 pilot cases, found ${selected.length}`);
   return selected;
 }

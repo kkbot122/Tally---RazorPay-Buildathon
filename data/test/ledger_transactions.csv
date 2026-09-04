@@ -50,6 +50,13 @@ L1506,2026-08-20,2026-08-20,7500.00,INR,CREDIT,INV748,Nova Retail Private Limite
 L6992,2026-08-26,2026-08-26,20000.00,INR,CREDIT,INV550,Nova Retail Private Limited,Synthetic ledger transaction,Synthetic ERP,BATCH-001
 L5009,2026-09-20,2026-09-20,30000.00,INR,CREDIT,INV385,Nova Retail Private Limited,Synthetic ledger transaction,Synthetic ERP,BATCH-001
 L5931,2026-08-28,2026-08-28,30000.00,INR,DEBIT,INV509,Metro Supplies,Synthetic ledger transaction,Synthetic ERP,BATCH-001
+L4542,2026-09-23,2026-09-23,9950.00,INR,CREDIT,INV-897,Metro Supplies,Receipt against invoice 896,Synthetic ERP,BATCH-001
+L8973,2026-08-14,2026-08-14,10000.00,INR,DEBIT,INV-217,Acme Private Limited,Receipt against invoice 216,Synthetic ERP,BATCH-001
+L6432,2026-09-02,2026-09-02,7500.00,INR,CREDIT,INV-605,BluePeak Technologies Limited,Receipt against invoice 604,Synthetic ERP,BATCH-001
+L9886,2026-09-07,2026-09-07,30000.00,INR,DEBIT,,Duplicate Usage Holdings,,Synthetic ERP,
+L2303,2026-09-07,2026-09-07,30000.00,INR,DEBIT,,Duplicate Usage Holdings,,Synthetic ERP,
+L2699,2026-08-17,2026-08-17,12450.00,INR,CREDIT,,Duplicate Usage Holdings,,Synthetic ERP,
+L5411,2026-08-17,2026-08-17,12450.00,INR,CREDIT,,Duplicate Usage Holdings,,Synthetic ERP,
 L4584,2026-09-04,2026-09-04,25000.00,INR,CREDIT,,Ambiguous Synthetic Entity,,Synthetic ERP,BATCH-001
 L3246,2026-09-04,2026-09-04,25000.00,INR,CREDIT,,Ambiguous Synthetic Entity,,Synthetic ERP,BATCH-001
 L7445,2026-09-24,2026-09-24,10000.00,INR,DEBIT,,Ambiguous Synthetic Entity,,Synthetic ERP,BATCH-001

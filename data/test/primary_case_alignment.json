@@ -531,6 +531,76 @@
   },
   {
     "side": "BANK",
+    "recordId": "B8973",
+    "caseId": "C086"
+  },
+  {
+    "side": "LEDGER",
+    "recordId": "L4542",
+    "caseId": "C086"
+  },
+  {
+    "side": "BANK",
+    "recordId": "B9143",
+    "caseId": "C087"
+  },
+  {
+    "side": "LEDGER",
+    "recordId": "L8973",
+    "caseId": "C087"
+  },
+  {
+    "side": "BANK",
+    "recordId": "B5685",
+    "caseId": "C088"
+  },
+  {
+    "side": "LEDGER",
+    "recordId": "L6432",
+    "caseId": "C088"
+  },
+  {
+    "side": "BANK",
+    "recordId": "B3872",
+    "caseId": "C089"
+  },
+  {
+    "side": "BANK",
+    "recordId": "B4732",
+    "caseId": "C089"
+  },
+  {
+    "side": "LEDGER",
+    "recordId": "L9886",
+    "caseId": "C089"
+  },
+  {
+    "side": "LEDGER",
+    "recordId": "L2303",
+    "caseId": "C089"
+  },
+  {
+    "side": "BANK",
+    "recordId": "B2001",
+    "caseId": "C090"
+  },
+  {
+    "side": "BANK",
+    "recordId": "B5600",
+    "caseId": "C090"
+  },
+  {
+    "side": "LEDGER",
+    "recordId": "L2699",
+    "caseId": "C090"
+  },
+  {
+    "side": "LEDGER",
+    "recordId": "L5411",
+    "caseId": "C090"
+  },
+  {
+    "side": "BANK",
     "recordId": "B5171",
     "caseId": "C097"
   },

@@ -44,6 +44,11 @@ C082,B4630,L1506,DISCREPANCY,AMOUNT_DISCREPANCY,"Related references and entities
 C083,B7687,L6992,DISCREPANCY,AMOUNT_DISCREPANCY,"Related references and entities are present, but the amounts contradict without an explanatory record."
 C084,B3337,L5009,DISCREPANCY,AMOUNT_DISCREPANCY,"Related references and entities are present, but the amounts contradict without an explanatory record."
 C085,B5449,L5931,DISCREPANCY,AMOUNT_DISCREPANCY,"Related references and entities are present, but the amounts contradict without an explanatory record."
+C086,B8973,L4542,DISCREPANCY,CONFLICTING_RECORDS,"The records retain compatible amount, currency, and direction evidence but conflict across their reference, counterparty, and descriptions."
+C087,B9143,L8973,DISCREPANCY,CONFLICTING_RECORDS,"The records retain compatible amount, currency, and direction evidence but conflict across their reference, counterparty, and descriptions."
+C088,B5685,L6432,DISCREPANCY,CONFLICTING_RECORDS,"The records retain compatible amount, currency, and direction evidence but conflict across their reference, counterparty, and descriptions."
+C089,B4732,L9886,DISCREPANCY,DUPLICATE_USAGE,"Two runtime proposals can target the same ledger record; stable consumption must reject the later use."
+C090,B5600,L2699,DISCREPANCY,DUPLICATE_USAGE,"Two runtime proposals can target the same ledger record; stable consumption must reject the later use."
 C091,B8817,,UNRESOLVED,MULTIPLE_PLAUSIBLE_CANDIDATES,Both ledger records expose identical observable evidence; no unique counterpart is truth-selected.
 C092,B8749,,UNRESOLVED,MULTIPLE_PLAUSIBLE_CANDIDATES,Both ledger records expose identical observable evidence; no unique counterpart is truth-selected.
 C093,B9642,,UNRESOLVED,MULTIPLE_PLAUSIBLE_CANDIDATES,Both ledger records expose identical observable evidence; no unique counterpart is truth-selected.
